@@ -24,6 +24,7 @@
     "@vitest/ui": "^4.0.15",
     "eslint": "^9",
     "eslint-config-next": "16.0.8",
+    "fast-check": "^4.5.3",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.0.15"
