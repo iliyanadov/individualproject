@@ -538,6 +538,34 @@ export class CLOBEngine {
     let filledQty = new Decimal(0);
     const trader = ledger.traders.get(incomingTraderId)!;
 
+    // ===== SELL-TO-CLOSE VALIDATION =====
+    // Calculate how many shares this trader has in open sell orders
+    let openSellQty = new Decimal(0);
+    for (const [, level] of ledger.market.orderBook.asks) {
+      for (const o of level.orders) {
+        if (o.traderId === incomingTraderId) {
+          openSellQty = openSellQty.plus(o.qty);
+        }
+      }
+    }
+
+    // Available shares = current holdings - open sell orders
+    const availableShares = trader.yesShares.minus(openSellQty);
+
+    // Reject if trying to sell more than available
+    if (order.qty.gt(availableShares)) {
+      return {
+        orderId: order.orderId,
+        status: "CANCELLED",
+        trades: [],
+        filledQty: new Decimal(0),
+        remainingQty: order.qty,
+        avgFillPrice: new Decimal(0),
+        timestamp: new Date().toISOString(),
+      };
+    }
+    // ===== END SELL-TO-CLOSE VALIDATION =====
+
     // Check if order is marketable (crosses the spread)
     const bestBid = this.getBestBid(book);
     if (bestBid && order.price.lte(bestBid)) {
@@ -628,6 +656,13 @@ export class CLOBEngine {
     let remainingQty = qty;
     let totalFillPrice = new Decimal(0);
     let filledQty = new Decimal(0);
+
+    // ===== SELL-TO-CLOSE VALIDATION =====
+    const trader = ledger.traders.get(incomingTraderId)!;
+    if (qty.gt(trader.yesShares)) {
+      throw new Error(`Insufficient shares for market sell. Have: ${trader.yesShares}, Trying to sell: ${qty}`);
+    }
+    // ===== END SELL-TO-CLOSE VALIDATION =====
 
     // Check if there are any bids
     if (book.bestBid) {

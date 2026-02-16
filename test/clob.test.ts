@@ -45,6 +45,10 @@ describe("CLOB: Price-Time Priority", () => {
       { id: "bob", cash: 10000 },
       { id: "carol", cash: 10000 },
     ]);
+    // Give traders some shares for testing sell-to-close
+    ledger.traders.get("alice")!.yesShares = new Decimal(100);
+    ledger.traders.get("bob")!.yesShares = new Decimal(100);
+    ledger.traders.get("carol")!.yesShares = new Decimal(100);
   });
 
   it("should fill FIFO at same price level", () => {
@@ -106,9 +110,16 @@ describe("CLOB: Order Matching", () => {
       { id: "bob", cash: 10000 },
       { id: "carol", cash: 10000 },
     ]);
+    // Give traders some shares for testing sell-to-close
+    ledger.traders.get("alice")!.yesShares = new Decimal(100);
+    ledger.traders.get("bob")!.yesShares = new Decimal(100);
+    ledger.traders.get("carol")!.yesShares = new Decimal(100);
   });
 
   it("should cross marketable limit orders immediately", () => {
+    // Give alice some shares to sell
+    ledger.traders.get("alice")!.yesShares = new Decimal(100);
+
     // Alice places ask at 0.50
     engine.placeLimitOrder(ledger, "alice", "SELL", 0.50, 10);
 
@@ -194,6 +205,10 @@ describe("CLOB: Market Orders", () => {
       { id: "bob", cash: 10000 },
       { id: "carol", cash: 10000 },
     ]);
+    // Give traders some shares for testing sell-to-close
+    ledger.traders.get("alice")!.yesShares = new Decimal(100);
+    ledger.traders.get("bob")!.yesShares = new Decimal(100);
+    ledger.traders.get("carol")!.yesShares = new Decimal(100);
   });
 
   it("should execute market orders at best available prices", () => {
@@ -269,6 +284,10 @@ describe("CLOB: Cancellations", () => {
       { id: "bob", cash: 10000 },
       { id: "carol", cash: 10000 },
     ]);
+    // Give traders some shares for testing sell-to-close
+    ledger.traders.get("alice")!.yesShares = new Decimal(100);
+    ledger.traders.get("bob")!.yesShares = new Decimal(100);
+    ledger.traders.get("carol")!.yesShares = new Decimal(100);
   });
 
   it("should remove order from book", () => {
@@ -332,6 +351,10 @@ describe("CLOB: Market Data", () => {
       { id: "bob", cash: 10000 },
       { id: "carol", cash: 10000 },
     ]);
+    // Give traders some shares for testing sell-to-close
+    ledger.traders.get("alice")!.yesShares = new Decimal(100);
+    ledger.traders.get("bob")!.yesShares = new Decimal(100);
+    ledger.traders.get("carol")!.yesShares = new Decimal(100);
   });
 
   it("should return best bid/ask correctly", () => {
@@ -411,6 +434,10 @@ describe("CLOB: Invariants", () => {
       { id: "bob", cash: 10000 },
       { id: "carol", cash: 10000 },
     ]);
+    // Give traders some shares for testing sell-to-close
+    ledger.traders.get("alice")!.yesShares = new Decimal(100);
+    ledger.traders.get("bob")!.yesShares = new Decimal(100);
+    ledger.traders.get("carol")!.yesShares = new Decimal(100);
   });
 
   it("should maintain FIFO at same price", () => {
@@ -508,6 +535,10 @@ describe("CLOB: Ledger Integration", () => {
       { id: "bob", cash: 10000 },
       { id: "carol", cash: 10000 },
     ]);
+    // Give traders some shares for testing sell-to-close
+    ledger.traders.get("alice")!.yesShares = new Decimal(100);
+    ledger.traders.get("bob")!.yesShares = new Decimal(100);
+    ledger.traders.get("carol")!.yesShares = new Decimal(100);
   });
 
   it("should track open orders per trader", () => {
@@ -549,7 +580,8 @@ describe("CLOB: Ledger Integration", () => {
 
     expectDecimalCloseToNumber(alice.cash, 10000);
     expectDecimalCloseToNumber(bob.cash, 10000);
-    expectDecimalCloseToNumber(alice.yesShares, 0);
+    // Traders are given 100 shares in beforeEach for testing sell-to-close
+    expectDecimalCloseToNumber(alice.yesShares, 100);
     expectDecimalCloseToNumber(alice.noShares, 0);
   });
 });
@@ -564,6 +596,9 @@ describe("CLOB: Edge Cases", () => {
       { id: "alice", cash: 10000 },
       { id: "bob", cash: 10000 },
     ]);
+    // Give traders some shares for testing sell-to-close
+    ledger.traders.get("alice")!.yesShares = new Decimal(100);
+    ledger.traders.get("bob")!.yesShares = new Decimal(100);
   });
 
   it("should handle zero quantity order gracefully", () => {
@@ -599,6 +634,9 @@ describe("CLOB: Logging", () => {
       { id: "alice", cash: 10000 },
       { id: "bob", cash: 10000 },
     ]);
+    // Give traders some shares for testing sell-to-close
+    ledger.traders.get("alice")!.yesShares = new Decimal(100);
+    ledger.traders.get("bob")!.yesShares = new Decimal(100);
   });
 
   it("should log order placed events", () => {
@@ -679,6 +717,9 @@ describe("CLOB: Singleton Instance", () => {
       { id: "alice", cash: 10000 },
       { id: "bob", cash: 10000 },
     ]);
+    // Give traders some shares for testing sell-to-close
+    ledger.traders.get("alice")!.yesShares = new Decimal(100);
+    ledger.traders.get("bob")!.yesShares = new Decimal(100);
 
     clob.placeLimitOrder(ledger, "alice", "SELL", 0.50, 10);
     const result = clob.placeLimitOrder(ledger, "bob", "BUY", 0.55, 5);
@@ -700,6 +741,11 @@ describe("CLOB: Complex Scenarios", () => {
       { id: "carol", cash: 10000 },
       { id: "dave", cash: 10000 },
     ]);
+    // Give traders some shares for testing sell-to-close
+    ledger.traders.get("alice")!.yesShares = new Decimal(100);
+    ledger.traders.get("bob")!.yesShares = new Decimal(100);
+    ledger.traders.get("carol")!.yesShares = new Decimal(100);
+    ledger.traders.get("dave")!.yesShares = new Decimal(100);
   });
 
   it("should handle order book with multiple price levels", () => {
@@ -757,5 +803,496 @@ describe("CLOB: Complex Scenarios", () => {
     // The orders array preserves order: Bob (3 remaining), Carol (5 untouched)
     expectDecimalCloseToNumber(ordersAtPrice[0].qty, 3); // Bob partially filled
     expectDecimalCloseToNumber(ordersAtPrice[1].qty, 5); // Carol untouched
+  });
+});
+
+// ============================================================================
+// CLOB: Strict Invariants (Critical Rules)
+// These tests enforce "always true" rules that must hold after EVERY operation
+// ============================================================================
+
+describe("CLOB: Strict Invariants - Matching & Book State", () => {
+  let engine: CLOBEngine;
+  let ledger: CLOBLedger;
+
+  beforeEach(() => {
+    engine = new CLOBEngine();
+    ledger = engine.initLedger([
+      { id: "alice", cash: 10000 },
+      { id: "bob", cash: 10000 },
+      { id: "carol", cash: 10000 },
+    ]);
+    // Give traders some shares for testing sell-to-close
+    ledger.traders.get("alice")!.yesShares = new Decimal(100);
+    ledger.traders.get("bob")!.yesShares = new Decimal(100);
+    ledger.traders.get("carol")!.yesShares = new Decimal(100);
+  });
+
+  // Helper: Assert book is not crossed after every operation
+  function assertBookNotCrossed() {
+    const book = ledger.market.orderBook;
+    const bestBid = engine.getBestBid(book);
+    const bestAsk = engine.getBestAsk(book);
+
+    if (bestBid !== undefined && bestAsk !== undefined) {
+      // bestBid must be less than bestAsk (strictly less, not equal)
+      expect(bestBid.lt(bestAsk)).withContext(
+        `Crossed book detected: bestBid=${bestBid} should be < bestAsk=${bestAsk}`
+      ).toBe(true);
+    }
+  }
+
+  // Helper: Assert trader has no negative balances
+  function assertNoNegativeBalances() {
+    for (const [, trader] of ledger.traders) {
+      expect(trader.cash.gte(0)).withContext(
+        `Trader ${trader.traderId} has negative cash: ${trader.cash}`
+      ).toBe(true);
+      expect(trader.yesShares.gte(0)).withContext(
+        `Trader ${trader.traderId} has negative shares: ${trader.yesShares}`
+      ).toBe(true);
+      expect(trader.noShares.gte(0)).withContext(
+        `Trader ${trader.traderId} has negative noShares: ${trader.noShares}`
+      ).toBe(true);
+    }
+  }
+
+  // Helper: Assert conservation of value (cash + shares * price = constant, accounting for trades)
+  function assertConservation(initialTraders: Map<string, any>) {
+    for (const [id, trader] of ledger.traders) {
+      const initial = initialTraders.get(id);
+      if (!initial) continue;
+
+      // Cash + shares value should not decrease without corresponding trades
+      // (We can't easily verify exact conservation without tracking all trades,
+      // but we can ensure balances never go negative)
+      expect(trader.cash.gte(0)).toBe(true);
+      expect(trader.yesShares.gte(0)).toBe(true);
+    }
+  }
+
+  // Helper: Assert order quantities are conserved
+  function assertOrderQtyConserved(orderQty: number, result: any) {
+    expect(result.filledQty.lte(orderQty)).withContext(
+      `filledQty (${result.filledQty}) exceeds orderQty (${orderQty})`
+    ).toBe(true);
+    expect(result.remainingQty.gte(0)).withContext(
+      `remainingQty (${result.remainingQty}) is negative`
+    ).toBe(true);
+
+    // filledQty + remainingQty should equal orderQty
+    const sum = result.filledQty.plus(result.remainingQty);
+    expect(sum.equals(orderQty)).withContext(
+      `filledQty (${result.filledQty}) + remainingQty (${result.remainingQty}) != orderQty (${orderQty})`
+    ).toBe(true);
+  }
+
+  it("invariant: no crossed book after limit buy (non-marketable)", () => {
+    engine.placeLimitOrder(ledger, "alice", "BUY", 0.45, 10);
+    assertBookNotCrossed();
+
+    engine.placeLimitOrder(ledger, "bob", "BUY", 0.46, 5);
+    assertBookNotCrossed();
+
+    engine.placeLimitOrder(ledger, "carol", "SELL", 0.50, 8);
+    assertBookNotCrossed();
+  });
+
+  it("invariant: no crossed book after marketable limit buy", () => {
+    // First, set up asks
+    engine.placeLimitOrder(ledger, "alice", "SELL", 0.50, 5);
+    engine.placeLimitOrder(ledger, "bob", "SELL", 0.52, 3);
+    assertBookNotCrossed();
+
+    // Now place a marketable buy (crosses the spread)
+    engine.placeLimitOrder(ledger, "carol", "BUY", 0.55, 3);
+    assertBookNotCrossed();
+
+    // Book should still not be crossed
+    const book = ledger.market.orderBook;
+    const bestBid = engine.getBestBid(book);
+    const bestAsk = engine.getBestAsk(book);
+    // If both exist, bestBid should be < bestAsk
+    if (bestBid !== undefined && bestAsk !== undefined) {
+      expect(bestBid.lt(bestAsk)).toBe(true);
+    }
+  });
+
+  it("invariant: no crossed book after limit sell (non-marketable)", () => {
+    engine.placeLimitOrder(ledger, "alice", "SELL", 0.55, 10);
+    assertBookNotCrossed();
+
+    engine.placeLimitOrder(ledger, "bob", "SELL", 0.56, 5);
+    assertBookNotCrossed();
+
+    engine.placeLimitOrder(ledger, "carol", "BUY", 0.50, 8);
+    assertBookNotCrossed();
+  });
+
+  it("invariant: no crossed book after marketable limit sell", () => {
+    // First, set up bids
+    engine.placeLimitOrder(ledger, "alice", "BUY", 0.50, 5);
+    engine.placeLimitOrder(ledger, "bob", "BUY", 0.48, 3);
+    assertBookNotCrossed();
+
+    // Now place a marketable sell (crosses the spread)
+    engine.placeLimitOrder(ledger, "carol", "SELL", 0.45, 4);
+    assertBookNotCrossed();
+  });
+
+  it("invariant: price-time priority (best price wins regardless of time)", () => {
+    // alice places bid at 0.45 first
+    engine.placeLimitOrder(ledger, "alice", "BUY", 0.45, 10);
+
+    // bob places bid at 0.46 later (better price should win)
+    engine.placeLimitOrder(ledger, "bob", "BUY", 0.46, 5);
+
+    // Sell at 0.44 should hit bob's better price first
+    const result = engine.placeLimitOrder(ledger, "carol", "SELL", 0.44, 8);
+
+    // Should have traded with bob first (better price)
+    expect(result.trades.length).toBeGreaterThan(0);
+    expect(result.trades[0].bidTraderId).toBe("bob");
+  });
+
+  it("invariant: FIFO within same price level (buy side)", () => {
+    // alice buys at 0.50 first, qty 10
+    engine.placeLimitOrder(ledger, "alice", "BUY", 0.50, 10);
+
+    // bob buys at 0.50 second, qty 5
+    engine.placeLimitOrder(ledger, "bob", "BUY", 0.50, 5);
+
+    // carol buys at 0.50 third, qty 8
+    engine.placeLimitOrder(ledger, "carol", "BUY", 0.50, 8);
+
+    // Sell 15 at 0.50 - should fill alice (10) then bob (5)
+    const result = engine.placeLimitOrder(ledger, "alice", "SELL", 0.50, 15);
+
+    expect(result.trades.length).toBe(2);
+    expect(result.trades[0].bidTraderId).toBe("alice");
+    expectDecimalCloseToNumber(result.trades[0].qty, 10);
+    expect(result.trades[1].bidTraderId).toBe("bob");
+    expectDecimalCloseToNumber(result.trades[1].qty, 5);
+
+    // Carol should still have 8 (untouched)
+    const book = ledger.market.orderBook;
+    const bidsAtPrice = engine.getOrdersAtPrice(book, "BUY", new Decimal(0.50));
+    expect(bidsAtPrice.length).toBe(1);
+    expect(bidsAtPrice[0].traderId).toBe("carol");
+  });
+
+  it("invariant: FIFO within same price level (sell side)", () => {
+    // alice sells at 0.50 first, qty 10
+    engine.placeLimitOrder(ledger, "alice", "SELL", 0.50, 10);
+
+    // bob sells at 0.50 second, qty 5
+    engine.placeLimitOrder(ledger, "bob", "SELL", 0.50, 5);
+
+    // carol sells at 0.50 third, qty 8
+    engine.placeLimitOrder(ledger, "carol", "SELL", 0.50, 8);
+
+    // Buy 15 at 0.50 - should fill alice (10) then bob (5)
+    const result = engine.placeLimitOrder(ledger, "alice", "BUY", 0.50, 15);
+
+    expect(result.trades.length).toBe(2);
+    expect(result.trades[0].askTraderId).toBe("alice");
+    expectDecimalCloseToNumber(result.trades[0].qty, 10);
+    expect(result.trades[1].askTraderId).toBe("bob");
+    expectDecimalCloseToNumber(result.trades[1].qty, 5);
+
+    // Carol should still have 8 (untouched)
+    const book = ledger.market.orderBook;
+    const asksAtPrice = engine.getOrdersAtPrice(book, "SELL", new Decimal(0.50));
+    expect(asksAtPrice.length).toBe(1);
+    expect(asksAtPrice[0].traderId).toBe("carol");
+  });
+
+  it("invariant: marketable limit order executes immediately for crossing portion", () => {
+    // Set up: asks at 0.52 and 0.54
+    engine.placeLimitOrder(ledger, "alice", "SELL", 0.52, 5);
+    engine.placeLimitOrder(ledger, "bob", "SELL", 0.54, 3);
+
+    // Buy at 0.55 with qty 10 - crosses with both asks
+    // Should execute immediately for crossing portion (5 + 3 = 8)
+    // Remaining 2 should go on book at 0.55
+    const result = engine.placeLimitOrder(ledger, "carol", "BUY", 0.55, 10);
+
+    expect(result.trades.length).toBe(2); // Two trades from crossing
+    expectDecimalCloseToNumber(result.filledQty, 8); // 5 + 3 filled
+    expect(result.status).toBe("PARTIALLY_FILLED"); // Filled some, remaining on book
+
+    // Verify remaining qty is on book
+    const book = ledger.market.orderBook;
+    const bidsAt55 = engine.getOrdersAtPrice(book, "BUY", new Decimal(0.55));
+    expect(bidsAt55.length).toBe(1);
+    expectDecimalCloseToNumber(bidsAt55[0].qty, 2);
+  });
+
+  it("invariant: partial fills conserve quantities", () => {
+    const initialAlice = { ...ledger.traders.get("alice")! };
+    const initialBob = { ...ledger.traders.get("bob")! };
+
+    // Bob places ask for 20
+    engine.placeLimitOrder(ledger, "bob", "SELL", 0.50, 20);
+
+    // Alice buys 10 (partial fill)
+    const result = engine.placeLimitOrder(ledger, "alice", "BUY", 0.50, 10);
+
+    assertOrderQtyConserved(10, result);
+    expect(result.status).toBe("FILLED"); // Fully filled
+    expectDecimalCloseToNumber(result.filledQty, 10);
+    expectDecimalCloseToNumber(result.remainingQty, 0);
+
+    // Check Bob's remaining order
+    const book = ledger.market.orderBook;
+    const asks = engine.getOrdersAtPrice(book, "SELL", new Decimal(0.50));
+    expect(asks.length).toBe(1);
+    expectDecimalCloseToNumber(asks[0].qty, 10); // Bob has 10 left
+  });
+
+  it("invariant: cancellations remove exactly remaining quantity", () => {
+    // Place an order
+    engine.placeLimitOrder(ledger, "alice", "BUY", 0.45, 100);
+
+    // Partially fill it
+    engine.placeLimitOrder(ledger, "bob", "SELL", 0.44, 30);
+
+    // Get the remaining order qty before cancel
+    const book = ledger.market.orderBook;
+    const bids = engine.getOrdersAtPrice(book, "BUY", new Decimal(0.45));
+    const remainingBefore = bids[0].qty;
+
+    // Cancel the order
+    const cancelResult = engine.cancelOrder(ledger, bids[0].orderId);
+
+    expect(cancelResult.status).toBe("CANCELLED");
+    expectDecimalCloseToNumber(cancelResult.remainingQty, remainingBefore);
+
+    // Verify order is completely removed
+    const bidsAfter = engine.getOrdersAtPrice(book, "BUY", new Decimal(0.45));
+    expect(bidsAfter.length).toBe(0);
+  });
+
+  it("invariant: cancellation never affects filled quantity", () => {
+    // Place and partially fill an order
+    const orderResult = engine.placeLimitOrder(ledger, "alice", "SELL", 0.50, 100);
+    engine.placeLimitOrder(ledger, "bob", "BUY", 0.50, 40);
+
+    // Get remaining qty before cancel
+    const book = ledger.market.orderBook;
+    const asks = engine.getOrdersAtPrice(book, "SELL", new Decimal(0.50));
+    const remainingQty = asks[0].qty; // 60 remaining (100 - 40 filled)
+
+    // Cancel the order
+    const cancelResult = engine.cancelOrder(ledger, asks[0].orderId);
+
+    // Cancel result reports the remaining (unfilled) qty and the filled qty
+    expectDecimalCloseToNumber(cancelResult.remainingQty, 60);
+    expectDecimalCloseToNumber(cancelResult.filledQty, 40); // Reports filled amount
+
+    // Verify order is completely removed
+    const asksAfter = engine.getOrdersAtPrice(book, "SELL", new Decimal(0.50));
+    expect(asksAfter.length).toBe(0);
+  });
+});
+
+describe("CLOB: Strict Invariants - Accounting & Position Rules", () => {
+  let engine: CLOBEngine;
+  let ledger: CLOBLedger;
+
+  beforeEach(() => {
+    engine = new CLOBEngine();
+    ledger = engine.initLedger([
+      { id: "alice", cash: 10000 },
+      { id: "bob", cash: 10000 },
+      { id: "carol", cash: 10000 },
+    ]);
+    // Give traders some shares for testing sell-to-close
+    ledger.traders.get("alice")!.yesShares = new Decimal(100);
+    ledger.traders.get("bob")!.yesShares = new Decimal(100);
+    ledger.traders.get("carol")!.yesShares = new Decimal(100);
+  });
+
+  it("invariant: no negative cash after trade", () => {
+    // Give alice exactly enough cash for this trade
+    const alice = ledger.traders.get("alice")!;
+    alice.cash = new Decimal(5); // Exactly enough for 10 shares at 0.50
+
+    // Bob sells at 0.50
+    engine.placeLimitOrder(ledger, "bob", "SELL", 0.50, 10);
+
+    // Alice buys at 0.50
+    engine.placeLimitOrder(ledger, "alice", "BUY", 0.50, 10);
+
+    // Alice's cash should be exactly 0 (not negative)
+    expect(alice.cash.equals(0)).toBe(true);
+  });
+
+  it("invariant: sell-to-close only - reject sell exceeding holdings", () => {
+    // Give alice exactly 50 shares
+    const alice = ledger.traders.get("alice")!;
+    alice.yesShares = new Decimal(50);
+
+    // Try to sell 100 shares (more than owned) - should return CANCELLED
+    const result = engine.placeLimitOrder(ledger, "alice", "SELL", 0.50, 100);
+    expect(result.status).toBe("CANCELLED");
+    expectDecimalCloseToNumber(result.filledQty, 0);
+    expectDecimalCloseToNumber(result.remainingQty, 100);
+  });
+
+  it("invariant: sell-to-close only - market order rejected when insufficient", () => {
+    // Give alice exactly 20 shares
+    const alice = ledger.traders.get("alice")!;
+    alice.yesShares = new Decimal(20);
+
+    // Try to market sell 100 shares (more than owned) - should fail
+    expect(() => {
+      engine.placeMarketOrder(ledger, "alice", "SELL", 100);
+    }).toThrow();
+  });
+
+  it("invariant: sell-to-close - account for open sell orders", () => {
+    // Give alice exactly 50 shares
+    const alice = ledger.traders.get("alice")!;
+    alice.yesShares = new Decimal(50);
+
+    // Alice places a sell order for 20 shares
+    engine.placeLimitOrder(ledger, "alice", "SELL", 0.50, 20);
+
+    // Now alice has 30 shares available (50 - 20 in open order)
+    // Try to sell 40 - should return CANCELLED (30 available < 40 requested)
+    const result = engine.placeLimitOrder(ledger, "alice", "SELL", 0.52, 40);
+    expect(result.status).toBe("CANCELLED");
+    expectDecimalCloseToNumber(result.filledQty, 0);
+    expectDecimalCloseToNumber(result.remainingQty, 40);
+  });
+
+  it("invariant: sell-to-close - can sell up to total held minus open sells", () => {
+    // Give alice exactly 50 shares
+    const alice = ledger.traders.get("alice")!;
+    alice.yesShares = new Decimal(50);
+
+    // Alice places a sell order for 20 shares
+    const order1 = engine.placeLimitOrder(ledger, "alice", "SELL", 0.50, 20);
+    expect(order1.status).toBe("OPEN");
+
+    // Alice can sell another 30 (50 - 20 = 30 available)
+    const order2 = engine.placeLimitOrder(ledger, "alice", "SELL", 0.52, 30);
+    expect(order2.status).toBe("OPEN");
+
+    // Trying to sell 1 more should return CANCELLED
+    const order3 = engine.placeLimitOrder(ledger, "alice", "SELL", 0.55, 1);
+    expect(order3.status).toBe("CANCELLED");
+  });
+
+  it("invariant: shares decrease only when sell is filled", () => {
+    // Give alice 50 shares
+    const alice = ledger.traders.get("alice")!;
+    alice.yesShares = new Decimal(50);
+
+    const initialShares = alice.yesShares.toNumber();
+
+    // Place a sell order (not filled yet)
+    engine.placeLimitOrder(ledger, "alice", "SELL", 0.50, 20);
+
+    // Shares should NOT have decreased yet (order is still open)
+    expect(alice.yesShares.toNumber()).toBe(initialShares);
+
+    // Now someone buys and fills it
+    engine.placeLimitOrder(ledger, "bob", "BUY", 0.50, 20);
+
+    // NOW shares should have decreased
+    expect(alice.yesShares.toNumber()).toBe(initialShares - 20);
+  });
+
+  it("invariant: cash conservation - buyer pays exactly price * qty", () => {
+    const initialAliceCash = ledger.traders.get("alice")!.cash;
+    const initialBobCash = ledger.traders.get("bob")!.cash;
+
+    // Bob sells 10 shares at 0.50
+    engine.placeLimitOrder(ledger, "bob", "SELL", 0.50, 10);
+
+    // Alice buys 10 shares at 0.50
+    const result = engine.placeLimitOrder(ledger, "alice", "BUY", 0.50, 10);
+
+    // Alice should have paid exactly 10 * 0.50 = 5 less
+    const expectedAliceCash = initialAliceCash.minus(new Decimal(5));
+    expect(ledger.traders.get("alice")!.cash.equals(expectedAliceCash)).toBe(true);
+
+    // Bob should have received exactly 5
+    const expectedBobCash = initialBobCash.plus(new Decimal(5));
+    expect(ledger.traders.get("bob")!.cash.equals(expectedBobCash)).toBe(true);
+  });
+
+  it("invariant: partial trade conserves correctly", () => {
+    const aliceShares = new Decimal(50);
+    const aliceCash = new Decimal(10000);
+    const alice = ledger.traders.get("alice")!;
+    alice.yesShares = aliceShares;
+    alice.cash = aliceCash;
+
+    const initialBobCash = ledger.traders.get("bob")!.cash;
+
+    // Bob sells 30 at 0.50
+    engine.placeLimitOrder(ledger, "bob", "SELL", 0.50, 30);
+
+    // Alice buys 10 (partial fill of Bob's order)
+    engine.placeLimitOrder(ledger, "alice", "BUY", 0.50, 10);
+
+    // Alice: gained 10 shares, paid 10 * 0.50 = 5
+    expect(alice.yesShares.equals(aliceShares.plus(10))).toBe(true);
+    expect(alice.cash.equals(aliceCash.minus(5))).toBe(true);
+
+    // Bob: sold 10 shares, gained 5, 20 remaining on order
+    expect(ledger.traders.get("bob")!.cash.equals(initialBobCash.plus(5))).toBe(true);
+
+    // Check Bob's remaining order
+    const book = ledger.market.orderBook;
+    const asks = engine.getOrdersAtPrice(book, "SELL", new Decimal(0.50));
+    expect(asks.length).toBe(1);
+    expectDecimalCloseToNumber(asks[0].qty, 20);
+  });
+
+  it("invariant: market buy walks book correctly", () => {
+    // Set up asks at multiple price levels
+    engine.placeLimitOrder(ledger, "alice", "SELL", 0.52, 5);
+    engine.placeLimitOrder(ledger, "bob", "SELL", 0.54, 10);
+    engine.placeLimitOrder(ledger, "carol", "SELL", 0.56, 8);
+
+    const initialAliceCash = ledger.traders.get("alice")!.cash;
+
+    // Market buy for 15 - should walk the book
+    const result = engine.placeMarketOrder(ledger, "carol", "BUY", 15);
+
+    // Should fill: 5 @ 0.52 + 10 @ 0.54 = 15 total
+    expectDecimalCloseToNumber(result.filledQty, 15);
+    expect(result.trades.length).toBe(2);
+    expectDecimalCloseToNumber(result.trades[0].qty, 5);
+    expectDecimalCloseToNumber(result.trades[1].qty, 10);
+
+    // Carol paid: 5*0.52 + 10*0.54 = 2.60 + 5.40 = 8.00
+    const expectedPayment = new Decimal(5).times(0.52).plus(new Decimal(10).times(0.54));
+    expect(ledger.traders.get("carol")!.cash.equals(initialAliceCash.minus(expectedPayment))).toBe(true);
+  });
+
+  it("invariant: multi-level execution fills correctly", () => {
+    // Bob sells at multiple levels
+    engine.placeLimitOrder(ledger, "bob", "SELL", 0.50, 5);
+    engine.placeLimitOrder(ledger, "bob", "SELL", 0.52, 5);
+    engine.placeLimitOrder(ledger, "bob", "SELL", 0.54, 5);
+
+    // Alice buys at 0.55 (marketable through all levels)
+    const result = engine.placeLimitOrder(ledger, "alice", "BUY", 0.55, 12);
+
+    // Should fill 5 @ 0.50, 5 @ 0.52, and 2 @ 0.54 (partial fill)
+    expect(result.trades.length).toBe(3);
+    expectDecimalCloseToNumber(result.filledQty, 12);
+    expect(result.status).toBe("FILLED"); // All 12 filled, 0 remaining for alice
+
+    // Verify remaining qty on book (bob has 3 left at 0.54)
+    const book = ledger.market.orderBook;
+    const asks = engine.getOrdersAtPrice(book, "SELL", new Decimal(0.54));
+    expect(asks.length).toBe(1);
+    expectDecimalCloseToNumber(asks[0].qty, 3); // 5 - 2 = 3 remaining
   });
 });
