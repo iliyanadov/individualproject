@@ -25,6 +25,8 @@ import {
   LimitOrder,
   Trade as CLOBTrade,
   OrderResult as CLOBOrderResult,
+  OrderBook,
+  PriceLevel,
 } from "./clob";
 import {
   UnifiedEngine,
@@ -41,6 +43,142 @@ import {
   calcSlippage,
   calcPriceImpact,
 } from "./engine-common";
+
+// ============================================================================
+// Helper Functions for Deep Cloning (preserving Maps)
+// ============================================================================
+
+/**
+ * Deep clone a CLOB ledger, properly reconstructing Maps from JSON serialization
+ */
+function cloneCLOBLedger(ledger: CLOBLedger): CLOBLedger {
+  const serialized = JSON.parse(JSON.stringify(ledger));
+
+  // Reconstruct OrderBook Maps
+  const orderBook: OrderBook = {
+    bids: new Map(),
+    asks: new Map(),
+  };
+
+  // Reconstruct bids (price -> PriceLevel)
+  if (serialized.market.orderBook.bids) {
+    for (const [price, level] of Object.entries(serialized.market.orderBook.bids)) {
+      // Convert Decimal strings back to Decimal objects
+      const reconstructedLevel: PriceLevel = {
+        price: new Decimal(level.price),
+        side: level.side,
+        totalQty: new Decimal(level.totalQty),
+        orders: level.orders.map((o: any) => ({
+          ...o,
+          price: new Decimal(o.price),
+          qty: new Decimal(o.qty),
+          originalQty: new Decimal(o.originalQty),
+        })),
+      };
+      orderBook.bids.set(price, reconstructedLevel);
+    }
+  }
+
+  // Reconstruct asks
+  if (serialized.market.orderBook.asks) {
+    for (const [price, level] of Object.entries(serialized.market.orderBook.asks)) {
+      const reconstructedLevel: PriceLevel = {
+        price: new Decimal(level.price),
+        side: level.side,
+        totalQty: new Decimal(level.totalQty),
+        orders: level.orders.map((o: any) => ({
+          ...o,
+          price: new Decimal(o.price),
+          qty: new Decimal(o.qty),
+          originalQty: new Decimal(o.originalQty),
+        })),
+      };
+      orderBook.asks.set(price, reconstructedLevel);
+    }
+  }
+
+  // Reconstruct bestBid/bestAsk if they exist
+  if (serialized.market.orderBook.bestBid) {
+    orderBook.bestBid = {
+      price: new Decimal(serialized.market.orderBook.bestBid.price),
+      side: serialized.market.orderBook.bestBid.side,
+      totalQty: new Decimal(serialized.market.orderBook.bestBid.totalQty),
+      orders: serialized.market.orderBook.bestBid.orders.map((o: any) => ({
+        ...o,
+        price: new Decimal(o.price),
+        qty: new Decimal(o.qty),
+        originalQty: new Decimal(o.originalQty),
+      })),
+    };
+  }
+  if (serialized.market.orderBook.bestAsk) {
+    orderBook.bestAsk = {
+      price: new Decimal(serialized.market.orderBook.bestAsk.price),
+      side: serialized.market.orderBook.bestAsk.side,
+      totalQty: new Decimal(serialized.market.orderBook.bestAsk.totalQty),
+      orders: serialized.market.orderBook.bestAsk.orders.map((o: any) => ({
+        ...o,
+        price: new Decimal(o.price),
+        qty: new Decimal(o.qty),
+        originalQty: new Decimal(o.originalQty),
+      })),
+    };
+  }
+
+  // Reconstruct market state
+  const market: CLOBMarketState = {
+    orderBook,
+    lastTradePrice: serialized.market.lastTradePrice ? new Decimal(serialized.market.lastTradePrice) : undefined,
+    tradeIdCounter: serialized.market.tradeIdCounter,
+    orderIdCounter: serialized.market.orderIdCounter,
+    settled: serialized.market.settled,
+  };
+
+  // Reconstruct traders Map
+  const traders = new Map<string, CLOBTraderAccount>();
+  if (serialized.traders) {
+    for (const [traderId, account] of Object.entries(serialized.traders)) {
+      traders.set(traderId, {
+        traderId: (account as any).traderId,
+        cash: new Decimal((account as any).cash),
+        yesShares: new Decimal((account as any).yesShares),
+        noShares: new Decimal((account as any).noShares),
+        openOrders: new Set((account as any).openOrders || []),
+      });
+    }
+  }
+
+  return { market, traders };
+}
+
+/**
+ * Deep clone an LMSR ledger, properly reconstructing Maps from JSON serialization
+ */
+function cloneLMSRLedger(ledger: LMSRLedger): LMSRLedger {
+  const serialized = JSON.parse(JSON.stringify(ledger));
+
+  // Reconstruct traders Map
+  const traders = new Map<string, LMSRTraderAccount>();
+  if (serialized.traders) {
+    for (const [traderId, account] of Object.entries(serialized.traders)) {
+      traders.set(traderId, {
+        traderId: (account as any).traderId,
+        cash: new Decimal((account as any).cash),
+        yesShares: new Decimal((account as any).yesShares),
+        noShares: new Decimal((account as any).noShares),
+      });
+    }
+  }
+
+  // Reconstruct market state (no Maps here, just Decimals)
+  const market: LMSRMarketState = {
+    b: serialized.market.b,
+    qYes: new Decimal(serialized.market.qYes),
+    qNo: new Decimal(serialized.market.qNo),
+  };
+
+  return { market, traders };
+}
 
 // ============================================================================
 // CLOB Engine Adapter
@@ -60,14 +198,15 @@ export class CLOBEngineAdapter implements UnifiedEngine {
   constructor(config: EngineConfig) {
     this.config = config;
     this.engine = new CLOBEngine();
-    // Initialize with dummy traders (will be reset properly)
+    // Initialize with empty ledger
     this.ledger = this.engine.initLedger([]);
-    this.initialState = JSON.parse(JSON.stringify(this.ledger));
+    // Deep clone for initial state, properly reconstructing Maps
+    this.initialState = cloneCLOBLedger(this.ledger);
   }
 
   initialize(): void {
-    // Reset to initial state
-    this.ledger = JSON.parse(JSON.stringify(this.initialState));
+    // Reset to initial state using proper deep clone
+    this.ledger = cloneCLOBLedger(this.initialState);
     this.logs = [];
     this.traderSnapshots.clear();
     this.orderMap.clear();
@@ -77,7 +216,7 @@ export class CLOBEngineAdapter implements UnifiedEngine {
     if (!this.ledger.traders.has(traderId)) {
       const account = this.engine.initTrader(traderId, cash);
       this.ledger.traders.set(traderId, account);
-      this.initialState.traders.set(traderId, JSON.parse(JSON.stringify(account)));
+      // Don't modify initialState - traders are added during simulation
     }
   }
 
@@ -386,7 +525,7 @@ export class CLOBEngineAdapter implements UnifiedEngine {
     }
 
     // Track fill-based changes (already applied in engine)
-    for (const fill of result.fills) {
+    for (const trade of result.trades) {
       // Note: CLOB engine already updates balances during matching
       // We just need to track what changed
     }
@@ -450,6 +589,42 @@ export class CLOBEngineAdapter implements UnifiedEngine {
       });
     }
   }
+
+  private createRejectedResult(
+    intent: OrderIntent,
+    stateBefore: MarketStateSnapshot,
+    error: string
+  ): ExecutionResult {
+    return {
+      engineType: this.engineType,
+      intent,
+      status: "REJECTED",
+      fills: [],
+      filledQty: new Decimal(0),
+      remainingQty: new Decimal(intent.qty ?? 0),
+      avgFillPrice: new Decimal(0),
+      priceBefore: stateBefore.midPrice ?? null,
+      priceAfter: stateBefore.midPrice ?? null,
+      slippage: null,
+      priceImpact: null,
+      deltas: {
+        cashChanges: new Map(),
+        yesShareChanges: new Map(),
+        noShareChanges: new Map(),
+        ordersAdded: [],
+        ordersRemoved: [],
+        ordersModified: [],
+      },
+      marketState: stateBefore,
+      logs: [{
+        type: "ERROR",
+        timestamp: Date.now(),
+        engineType: this.engineType,
+        data: { error, intentId: intent.intentId },
+      }],
+      timestamp: Date.now(),
+    };
+  }
 }
 
 // ============================================================================
@@ -471,12 +646,14 @@ export class LMSREngineAdapter implements UnifiedEngine {
     this.engine = new BinaryLMSR();
     const b = config.liquidity ?? 100;
     this.ledger = this.engine.initLedger(b, []);
-    this.initialState = JSON.parse(JSON.stringify(this.ledger));
+    // Deep clone for initial state, properly reconstructing Maps
+    this.initialState = cloneLMSRLedger(this.ledger);
     this.traderStats = new Map();
   }
 
   initialize(): void {
-    this.ledger = JSON.parse(JSON.stringify(this.initialState));
+    // Reset to initial state using proper deep clone
+    this.ledger = cloneLMSRLedger(this.initialState);
     this.logs = [];
     this.traderStats.clear();
   }
@@ -485,7 +662,7 @@ export class LMSREngineAdapter implements UnifiedEngine {
     if (!this.ledger.traders.has(traderId)) {
       const account = this.engine.initTrader(traderId, cash);
       this.ledger.traders.set(traderId, account);
-      this.initialState.traders.set(traderId, JSON.parse(JSON.stringify(account)));
+      // Don't modify initialState
     }
     this.traderStats.set(traderId, { trades: 0, volume: new Decimal(0), value: new Decimal(0) });
   }
@@ -722,7 +899,7 @@ export class LMSREngineAdapter implements UnifiedEngine {
 }
 
 // ============================================================================
-// Export factory function
+// Export factory functions
 // ============================================================================
 
 export function createEngine(type: string, config: EngineConfig): UnifiedEngine {
@@ -735,3 +912,6 @@ export function createEngine(type: string, config: EngineConfig): UnifiedEngine 
       throw new Error(`Unknown engine type: ${type}`);
   }
 }
+
+// Re-export hybrid router functions
+export { createHybridEngine, createHybridConfig, HybridRouterEngine, HybridConfig } from "./hybrid-router";

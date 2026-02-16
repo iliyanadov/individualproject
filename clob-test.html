@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CLOB Order Book Tester</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #3b82f6;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 300px 1fr 350px;
+            gap: 20px;
+        }
+
+        .panel {
+            background: #1e293b;
+            border-radius: 8px;
+            padding: 16px;
+            border: 1px solid #334155;
+        }
+
+        .panel h2 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .control-group {
+            margin-bottom: 12px;
+        }
+
+        label {
+            display: block;
+            font-size: 12px;
+            color: #64748b;
+            margin-bottom: 4px;
+        }
+
+        input, select, button {
+            width: 100%;
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid #334155;
+            background: #0f172a;
+            color: #e2e8f0;
+            font-size: 14px;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+
+        button {
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.15s;
+        }
+
+        .btn-buy {
+            background: #22c55e;
+            border-color: #22c55e;
+            color: #000;
+        }
+
+        .btn-buy:hover {
+            background: #16a34a;
+        }
+
+        .btn-sell {
+            background: #ef4444;
+            border-color: #ef4444;
+            color: #fff;
+        }
+
+        .btn-sell:hover {
+            background: #dc2626;
+        }
+
+        .btn-secondary {
+            background: #475569;
+            border-color: #475569;
+        }
+
+        .btn-secondary:hover {
+            background: #64748b;
+        }
+
+        .orderbook {
+            display: flex;
+            flex-direction: column;
+            height: 500px;
+        }
+
+        .ob-header {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
+            padding: 8px;
+            background: #0f172a;
+            border-radius: 6px 6px 0 0;
+            font-size: 11px;
+            color: #64748b;
+            font-weight: 600;
+        }
+
+        .ob-section {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .ob-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
+            padding: 6px 8px;
+            font-size: 13px;
+            border-bottom: 1px solid #334155;
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+
+        .ob-row:hover {
+            background: #334155;
+        }
+
+        .ob-row.bid {
+            color: #22c55e;
+        }
+
+        .ob-row.ask {
+            color: #ef4444;
+        }
+
+        .ob-spread {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 12px;
+            background: #0f172a;
+            border-top: 1px solid #334155;
+            border-bottom: 1px solid #334155;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .market-data {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .data-point {
+            background: #0f172a;
+            padding: 10px;
+            border-radius: 6px;
+        }
+
+        .data-label {
+            font-size: 10px;
+            color: #64748b;
+            text-transform: uppercase;
+        }
+
+        .data-value {
+            font-size: 18px;
+            font-weight: 600;
+            color: #3b82f6;
+        }
+
+        .log {
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 11px;
+            background: #0f172a;
+            padding: 12px;
+            border-radius: 6px;
+        }
+
+        .log-entry {
+            margin-bottom: 4px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #1e293b;
+        }
+
+        .log-trade {
+            color: #fbbf24;
+        }
+
+        .log-order {
+            color: #94a3b8;
+        }
+
+        .log-cancel {
+            color: #ef4444;
+        }
+
+        .depth-chart {
+            height: 120px;
+            background: #0f172a;
+            border-radius: 6px;
+            padding: 8px;
+            margin-top: 12px;
+            position: relative;
+        }
+
+        .depth-bar {
+            position: absolute;
+            bottom: 0;
+            transition: all 0.2s;
+        }
+
+        .depth-bar.bid {
+            background: rgba(34, 197, 94, 0.6);
+        }
+
+        .depth-bar.ask {
+            background: rgba(239, 68, 68, 0.6);
+        }
+
+        .traders-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .trader-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 8px;
+            font-size: 12px;
+            border-bottom: 1px solid #334155;
+        }
+
+        .trader-id {
+            color: #94a3b8;
+        }
+
+        .trader-balances {
+            text-align: right;
+        }
+
+        .balance-cash {
+            color: #fbbf24;
+        }
+
+        .balance-shares {
+            color: #3b82f6;
+        }
+
+        .preset-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .preset-btn {
+            padding: 8px;
+            font-size: 11px;
+            background: #475569;
+            border: none;
+            color: #e2e8f0;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .preset-btn:hover {
+            background: #64748b;
+        }
+
+        .quantity-indicator {
+            background: #0f172a;
+            height: 4px;
+            border-radius: 2px;
+            margin-top: 2px;
+        }
+
+        .quantity-fill {
+            height: 100%;
+            border-radius: 2px;
+            background: currentColor;
+            opacity: 0.3;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #3b82f6;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .success {
+            background: #22c55e !important;
+            border-color: #22c55e !important;
+        }
+
+        .error {
+            background: #ef4444 !important;
+            border-color: #ef4444 !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📈 CLOB Order Book Tester</h1>
+
+        <div class="grid">
+            <!-- Left Panel: Controls -->
+            <div class="panel">
+                <h2>Place Order</h2>
+
+                <div class="control-group">
+                    <label>Trader ID</label>
+                    <select id="traderSelect">
+                        <option value="trader1">trader1</option>
+                        <option value="trader2">trader2</option>
+                        <option value="trader3">trader3</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label>Order Type</label>
+                    <select id="orderType">
+                        <option value="LIMIT">Limit Order</option>
+                        <option value="MARKET">Market Order</option>
+                    </select>
+                </div>
+
+                <div class="control-group" id="priceGroup">
+                    <label>Price</label>
+                    <input type="number" id="price" value="0.50" step="0.01" min="0" max="1">
+                </div>
+
+                <div class="control-group">
+                    <label>Quantity</label>
+                    <input type="number" id="quantity" value="10" step="1" min="1">
+                </div>
+
+                <div class="control-group">
+                    <button class="btn-buy" onclick="placeBuyOrder()">🟢 BUY</button>
+                </div>
+
+                <div class="control-group">
+                    <button class="btn-sell" onclick="placeSellOrder()">🔴 SELL</button>
+                </div>
+
+                <h2 style="margin-top: 20px;">Cancel Order</h2>
+                <div class="control-group">
+                    <label>Order ID</label>
+                    <input type="text" id="cancelOrderId" placeholder="e.g., ord-1">
+                </div>
+                <div class="control-group">
+                    <button class="btn-secondary" onclick="cancelOrder()">Cancel Order</button>
+                </div>
+
+                <h2 style="margin-top: 20px;">Actions</h2>
+                <div class="preset-buttons">
+                    <button class="preset-btn" onclick="loadThinMarket()">Thin Market</button>
+                    <button class="preset-btn" onclick="loadThickMarket()">Thick Market</button>
+                    <button class="preset-btn" onclick="loadCrossedBook()">Crossed Book</button>
+                    <button class="preset-btn" onclick="resetBook()">Reset Book</button>
+                </div>
+            </div>
+
+            <!-- Center Panel: Order Book -->
+            <div class="panel">
+                <h2>Order Book</h2>
+
+                <div class="market-data">
+                    <div class="data-point">
+                        <div class="data-label">Best Bid</div>
+                        <div class="data-value" id="bestBid">--</div>
+                    </div>
+                    <div class="data-point">
+                        <div class="data-label">Best Ask</div>
+                        <div class="data-value" id="bestAsk">--</div>
+                    </div>
+                    <div class="data-point">
+                        <div class="data-label">Spread</div>
+                        <div class="data-value" id="spread">--</div>
+                    </div>
+                    <div class="data-point">
+                        <div class="data-label">Mid Price</div>
+                        <div class="data-value" id="midPrice">--</div>
+                    </div>
+                    <div class="data-point">
+                        <div class="data-label">Bid Depth (3)</div>
+                        <div class="data-value" id="bidDepth">--</div>
+                    </div>
+                    <div class="data-point">
+                        <div class="data-label">Ask Depth (3)</div>
+                        <div class="data-value" id="askDepth">--</div>
+                    </div>
+                </div>
+
+                <div class="orderbook">
+                    <div class="ob-header">
+                        <span style="text-align: right">Bid Qty</span>
+                        <span style="text-align: center">Price</span>
+                        <span>Ask Qty</span>
+                    </div>
+
+                    <!-- Asks (sells) - shown in reverse order at top -->
+                    <div class="ob-section" id="asks"></div>
+
+                    <div class="ob-spread" id="spreadDisplay">
+                        Spread: <span id="spreadValue">--</span> |
+                        Mid: <span id="midValue">--</span>
+                    </div>
+
+                    <!-- Bids (buys) -->
+                    <div class="ob-section" id="bids"></div>
+                </div>
+
+                <div class="depth-chart" id="depthChart"></div>
+            </div>
+
+            <!-- Right Panel: Traders & Logs -->
+            <div class="panel">
+                <h2>Trader States</h2>
+                <div class="traders-list" id="tradersList"></div>
+
+                <h2 style="margin-top: 16px;">Event Log</h2>
+                <div class="log" id="eventLog"></div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Import CLOB engine
+        import { CLOBEngine } from './src/lib/clob.ts';
+
+        // Global state
+        let clob;
+        let ledger;
+        let orderIdCounter = 0;
+
+        // Initialize
+        function init() {
+            clob = new CLOBEngine();
+            resetBook();
+            updateDisplay();
+        }
+
+        function resetBook() {
+            // Initialize with 3 traders
+            ledger = clob.initLedger([
+                { id: 'trader1', cash: 10000 },
+                { id: 'trader2', cash: 10000 },
+                { id: 'trader3', cash: 10000 }
+            ]);
+            orderIdCounter = 0;
+            log('System', 'Book initialized with 3 traders');
+            updateDisplay();
+        }
+
+        function generateOrderId() {
+            return `ord-${++orderIdCounter}`;
+        }
+
+        function placeBuyOrder() {
+            const traderId = document.getElementById('traderSelect').value;
+            const orderType = document.getElementById('orderType').value;
+            const price = parseFloat(document.getElementById('price').value);
+            const qty = parseFloat(document.getElementById('quantity').value);
+
+            if (orderType === 'MARKET') {
+                const result = clob.placeMarketOrder(ledger, traderId, 'BUY', qty);
+                log('MARKET BUY', `Trader: ${traderId}, Qty: ${qty}, Filled: ${result.filledQty.toString()}`);
+                if (result.trades.length > 0) {
+                    result.trades.forEach(t => {
+                        log('TRADE', `Price: ${t.price}, Qty: ${t.qty}, Bid: ${t.bidTraderId}, Ask: ${t.askTraderId}`);
+                    });
+                }
+            } else {
+                const result = clob.placeLimitOrder(ledger, traderId, 'BUY', price, qty);
+                log('LIMIT BUY', `ID: ${result.orderId}, Price: ${price}, Qty: ${qty}, Status: ${result.status}`);
+                if (result.trades.length > 0) {
+                    result.trades.forEach(t => {
+                        log('TRADE', `Price: ${t.price}, Qty: ${t.qty}, Bid: ${t.bidTraderId}, Ask: ${t.askTraderId}`);
+                    });
+                }
+            }
+            updateDisplay();
+        }
+
+        function placeSellOrder() {
+            const traderId = document.getElementById('traderSelect').value;
+            const orderType = document.getElementById('orderType').value;
+            const price = parseFloat(document.getElementById('price').value);
+            const qty = parseFloat(document.getElementById('quantity').value);
+
+            if (orderType === 'MARKET') {
+                const result = clob.placeMarketOrder(ledger, traderId, 'SELL', qty);
+                log('MARKET SELL', `Trader: ${traderId}, Qty: ${qty}, Filled: ${result.filledQty.toString()}`);
+                if (result.trades.length > 0) {
+                    result.trades.forEach(t => {
+                        log('TRADE', `Price: ${t.price}, Qty: ${t.qty}, Bid: ${t.bidTraderId}, Ask: ${t.askTraderId}`);
+                    });
+                }
+            } else {
+                const result = clob.placeLimitOrder(ledger, traderId, 'SELL', price, qty);
+                log('LIMIT SELL', `ID: ${result.orderId}, Price: ${price}, Qty: ${qty}, Status: ${result.status}`);
+                if (result.trades.length > 0) {
+                    result.trades.forEach(t => {
+                        log('TRADE', `Price: ${t.price}, Qty: ${t.qty}, Bid: ${t.bidTraderId}, Ask: ${t.askTraderId}`);
+                    });
+                }
+            }
+            updateDisplay();
+        }
+
+        function cancelOrder() {
+            const orderId = document.getElementById('cancelOrderId').value;
+            if (!orderId) {
+                alert('Please enter an Order ID');
+                return;
+            }
+            const result = clob.cancelOrder(ledger, orderId);
+            log('CANCEL', `ID: ${orderId}, Status: ${result.status}`);
+            updateDisplay();
+        }
+
+        function loadThinMarket() {
+            resetBook();
+            // Add some thin liquidity orders
+            clob.placeLimitOrder(ledger, 'trader1', 'SELL', 0.55, 5);
+            clob.placeLimitOrder(ledger, 'trader2', 'SELL', 0.60, 3);
+            clob.placeLimitOrder(ledger, 'trader1', 'BUY', 0.45, 8);
+            clob.placeLimitOrder(ledger, 'trader3', 'BUY', 0.40, 5);
+            log('System', 'Loaded thin market preset');
+            updateDisplay();
+        }
+
+        function loadThickMarket() {
+            resetBook();
+            // Add thick liquidity
+            for (let i = 0; i < 5; i++) {
+                const trader = `trader${(i % 3) + 1}`;
+                clob.placeLimitOrder(ledger, trader, 'SELL', 0.50 + (i + 1) * 0.02, 20 + i * 5);
+                clob.placeLimitOrder(ledger, trader, 'BUY', 0.50 - (i + 1) * 0.02, 20 + i * 5);
+            }
+            log('System', 'Loaded thick market preset');
+            updateDisplay();
+        }
+
+        function loadCrossedBook() {
+            resetBook();
+            // Create crossed book (bid >= ask)
+            clob.placeLimitOrder(ledger, 'trader1', 'BUY', 0.55, 10);
+            clob.placeLimitOrder(ledger, 'trader2', 'SELL', 0.52, 8);
+            // These should immediately cross and trade
+            log('System', 'Loaded crossed book - orders should execute immediately');
+            updateDisplay();
+        }
+
+        function updateDisplay() {
+            const book = ledger.market.orderBook;
+
+            // Get market data
+            const bestBid = clob.getBestBid(book);
+            const bestAsk = clob.getBestAsk(book);
+            const spread = clob.getSpread(book);
+            const midPrice = clob.getMidPrice(book);
+            const bidDepth = clob.getDepth(book, 'BUY', 3);
+            const askDepth = clob.getDepth(book, 'SELL', 3);
+
+            // Update display
+            document.getElementById('bestBid').textContent = bestBid ? bestBid.toFixed(2) : '--';
+            document.getElementById('bestAsk').textContent = bestAsk ? bestAsk.toFixed(2) : '--';
+            document.getElementById('spread').textContent = spread ? spread.toFixed(4) : '--';
+            document.getElementById('midPrice').textContent = midPrice ? midPrice.toFixed(2) : '--';
+            document.getElementById('bidDepth').textContent = bidDepth ? bidDepth.toString() : '--';
+            document.getElementById('askDepth').textContent = askDepth ? askDepth.toString() : '--';
+            document.getElementById('spreadValue').textContent = spread ? spread.toFixed(4) : '--';
+            document.getElementById('midValue').textContent = midPrice ? midPrice.toFixed(2) : '--';
+
+            // Update order book display
+            updateOrderBook(book);
+            updateTraders();
+            updateDepthChart(book);
+        }
+
+        function updateOrderBook(book) {
+            const asksContainer = document.getElementById('asks');
+            const bidsContainer = document.getElementById('bids');
+
+            // Get all asks and sort by price ascending
+            const asks = [];
+            for (const [price, level] of book.asks) {
+                asks.push({ price: parseFloat(price), ...level });
+            }
+            asks.sort((a, b) => a.price - b.price);
+
+            // Get all bids and sort by price descending
+            const bids = [];
+            for (const [price, level] of book.bids) {
+                bids.push({ price: parseFloat(price), ...level });
+            }
+            bids.sort((a, b) => b.price - a.price);
+
+            // Render asks (reversed - highest at top)
+            asksContainer.innerHTML = '';
+            for (let i = asks.length - 1; i >= Math.max(0, asks.length - 10); i--) {
+                const ask = asks[i];
+                const totalQty = ask.orders.reduce((sum, o) => sum + parseFloat(o.qty), 0);
+                const row = createOrderRow(ask.price, totalQty, ask.orders.length, 'ask');
+                asksContainer.appendChild(row);
+            }
+
+            // Render bids
+            bidsContainer.innerHTML = '';
+            for (let i = 0; i < Math.min(bids.length, 10); i++) {
+                const bid = bids[i];
+                const totalQty = bid.orders.reduce((sum, o) => sum + parseFloat(o.qty), 0);
+                const row = createOrderRow(bid.price, totalQty, bid.orders.length, 'bid');
+                bidsContainer.appendChild(row);
+            }
+
+            // If empty, show message
+            if (asks.length === 0 && bids.length === 0) {
+                asksContainer.innerHTML = '<div style="padding: 20px; text-align: center; color: #64748b;">No orders</div>';
+            }
+        }
+
+        function createOrderRow(price, qty, orderCount, side) {
+            const row = document.createElement('div');
+            row.className = `ob-row ${side}`;
+            row.innerHTML = `
+                <div style="text-align: right">${side === 'bid' ? qty.toFixed(1) : ''}</div>
+                <div style="text-align: center; font-weight: 600;">${price.toFixed(2)}</div>
+                <div>${side === 'ask' ? qty.toFixed(1) : ''}</div>
+            `;
+            return row;
+        }
+
+        function updateTraders() {
+            const container = document.getElementById('tradersList');
+            container.innerHTML = '';
+
+            for (const [id, trader] of ledger.traders) {
+                const row = document.createElement('div');
+                row.className = 'trader-row';
+                row.innerHTML = `
+                    <div>
+                        <div class="trader-id">${id}</div>
+                        <div style="font-size: 10px; color: #64748b;">Orders: ${trader.openOrders.size}</div>
+                    </div>
+                    <div class="trader-balances">
+                        <div class="balance-cash">💰 $${trader.cash.toFixed(2)}</div>
+                        <div class="balance-shares">📈 Y:${trader.yesShares.toFixed(1)} N:${trader.noShares.toFixed(1)}</div>
+                    </div>
+                `;
+                container.appendChild(row);
+            }
+        }
+
+        function updateDepthChart(book) {
+            const container = document.getElementById('depthChart');
+            container.innerHTML = '';
+
+            const bids = [];
+            const asks = [];
+
+            for (const [price, level] of book.bids) {
+                const totalQty = level.orders.reduce((sum, o) => sum + parseFloat(o.qty), 0);
+                bids.push({ price: parseFloat(price), qty: totalQty });
+            }
+            bids.sort((a, b) => b.price - a.price);
+
+            for (const [price, level] of book.asks) {
+                const totalQty = level.orders.reduce((sum, o) => sum + parseFloat(o.qty), 0);
+                asks.push({ price: parseFloat(price), qty: totalQty });
+            }
+            asks.sort((a, b) => a.price - b.price);
+
+            if (bids.length === 0 && asks.length === 0) {
+                container.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #64748b; font-size: 12px;">No depth data</div>';
+                return;
+            }
+
+            const maxQty = Math.max(
+                ...bids.map(b => b.qty),
+                ...asks.map(a => a.qty)
+            );
+
+            const width = container.clientWidth - 16;
+            const barWidth = Math.max(4, Math.min(20, width / Math.max(bids.length, asks.length)));
+
+            // Render bids (green, left side growing inward)
+            bids.forEach((bid, i) => {
+                const bar = document.createElement('div');
+                bar.className = 'depth-bar bid';
+                const height = (bid.qty / maxQty) * 100;
+                bar.style.cssText = `
+                    left: ${i * barWidth}px;
+                    width: ${barWidth - 1}px;
+                    height: ${height}%;
+                `;
+                bar.title = `Bid: ${bid.price.toFixed(2)}, Qty: ${bid.qty}`;
+                container.appendChild(bar);
+            });
+
+            // Render asks (red, right side growing inward)
+            asks.forEach((ask, i) => {
+                const bar = document.createElement('div');
+                bar.className = 'depth-bar ask';
+                const height = (ask.qty / maxQty) * 100;
+                bar.style.cssText = `
+                    right: ${(asks.length - 1 - i) * barWidth}px;
+                    width: ${barWidth - 1}px;
+                    height: ${height}%;
+                `;
+                bar.title = `Ask: ${ask.price.toFixed(2)}, Qty: ${ask.qty}`;
+                container.appendChild(bar);
+            });
+        }
+
+        function log(type, message) {
+            const logContainer = document.getElementById('eventLog');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+
+            let typeClass = 'log-order';
+            if (type === 'TRADE') typeClass = 'log-trade';
+            if (type === 'CANCEL') typeClass = 'log-cancel';
+
+            const time = new Date().toLocaleTimeString();
+            entry.innerHTML = `<span style="color: #64748b;">[${time}]</span> <span class="${typeClass}">${type}:</span> ${message}`;
+            logContainer.insertBefore(entry, logContainer.firstChild);
+
+            // Keep only last 50 entries
+            while (logContainer.children.length > 50) {
+                logContainer.removeChild(logContainer.lastChild);
+            }
+        }
+
+        // Export functions to global scope
+        window.placeBuyOrder = placeBuyOrder;
+        window.placeSellOrder = placeSellOrder;
+        window.cancelOrder = cancelOrder;
+        window.loadThinMarket = loadThinMarket;
+        window.loadThickMarket = loadThickMarket;
+        window.loadCrossedBook = loadCrossedBook;
+        window.resetBook = resetBook;
+
+        // Initialize on load
+        init();
+    </script>
+</body>
+</html>
