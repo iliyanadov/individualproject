@@ -40,7 +40,8 @@ export default function CLOBTestPage() {
     trader3.yesShares = trader3.yesShares.plus(100);
 
     setLedger(newLedger);
-    log("Book initialized with 3 traders, 100 shares each");
+    setLogs([]);
+    log("Book reset with 3 traders, 100 shares each");
     setError("");
   }
 
@@ -58,10 +59,9 @@ export default function CLOBTestPage() {
   }
 
   function getOrderBook() {
-    if (!ledger) return { bids: [] as typeof priceLevel[], asks: [] as typeof priceLevel[] };
+    if (!ledger) return { bids: [], asks: [] };
 
     const book = ledger.market.orderBook;
-    const priceLevel = { price: "", totalQty: 0, orders: 0, ordersList: [] as any[] };
 
     const bids = Array.from(book.bids.values()).map(level => ({
       price: level.price.toNumber(),
@@ -103,11 +103,15 @@ export default function CLOBTestPage() {
         );
         if (bid) {
           const order = bid.orders.find(o => o.orderId === orderId);
-          orders.push({ ...order, price: order.price.toNumber(), qty: order.qty.toNumber() });
+          if (order) {
+            orders.push({ ...order, price: order.price.toNumber(), qty: order.qty.toNumber() });
+          }
         }
         if (ask) {
           const order = ask.orders.find(o => o.orderId === orderId);
-          orders.push({ ...order, price: order.price.toNumber(), qty: order.qty.toNumber() });
+          if (order) {
+            orders.push({ ...order, price: order.price.toNumber(), qty: order.qty.toNumber() });
+          }
         }
       }
     }
@@ -236,40 +240,52 @@ export default function CLOBTestPage() {
   }
 
   function loadPreset(preset: string) {
-    resetBook();
-    if (!ledger) return;
+    // Create a fresh new ledger, reset logs
+    const newLedger = clob.initLedger([
+      { id: "trader1", cash: 10000 },
+      { id: "trader2", cash: 10000 },
+      { id: "trader3", cash: 10000 },
+    ]);
 
+    // Give each trader 100 initial shares
+    const trader1 = newLedger.traders.get("trader1")!;
+    const trader2 = newLedger.traders.get("trader2")!;
+    const trader3 = newLedger.traders.get("trader3")!;
+    trader1.yesShares = trader1.yesShares.plus(100);
+    trader2.yesShares = trader2.yesShares.plus(100);
+    trader3.yesShares = trader3.yesShares.plus(100);
+
+    // Apply preset orders to the new ledger
     switch (preset) {
       case "thin":
-        clob.placeLimitOrder(ledger, "trader1", "SELL", 0.55, 5);
-        clob.placeLimitOrder(ledger, "trader2", "SELL", 0.60, 3);
-        clob.placeLimitOrder(ledger, "trader1", "BUY", 0.45, 8);
-        clob.placeLimitOrder(ledger, "trader3", "BUY", 0.40, 5);
-        log("Loaded thin market preset");
+        clob.placeLimitOrder(newLedger, "trader1", "SELL", 0.55, 5);
+        clob.placeLimitOrder(newLedger, "trader2", "SELL", 0.60, 3);
+        clob.placeLimitOrder(newLedger, "trader1", "BUY", 0.45, 8);
+        clob.placeLimitOrder(newLedger, "trader3", "BUY", 0.40, 5);
         break;
       case "thick":
         for (let i = 0; i < 5; i++) {
           const trader = `trader${(i % 3) + 1}` as const;
-          clob.placeLimitOrder(ledger, trader, "SELL", 0.50 + (i + 1) * 0.02, 20 + i * 5);
-          clob.placeLimitOrder(ledger, trader, "BUY", 0.50 - (i + 1) * 0.02, 20 + i * 5);
+          clob.placeLimitOrder(newLedger, trader, "SELL", 0.50 + (i + 1) * 0.02, 20 + i * 5);
+          clob.placeLimitOrder(newLedger, trader, "BUY", 0.50 - (i + 1) * 0.02, 20 + i * 5);
         }
-        log("Loaded thick market preset");
         break;
       case "crossed":
-        clob.placeLimitOrder(ledger, "trader1", "BUY", 0.55, 10);
-        clob.placeLimitOrder(ledger, "trader2", "SELL", 0.52, 8);
-        log("Loaded crossed book - orders should execute immediately");
+        clob.placeLimitOrder(newLedger, "trader1", "BUY", 0.55, 10);
+        clob.placeLimitOrder(newLedger, "trader2", "SELL", 0.52, 8);
         break;
       case "fifo":
-        clob.placeLimitOrder(ledger, "trader1", "BUY", 0.50, 10);
-        clob.placeLimitOrder(ledger, "trader2", "BUY", 0.50, 5);
-        clob.placeLimitOrder(ledger, "trader3", "BUY", 0.50, 8);
-        log("FIFO test: 3 buy orders at $0.50 (trader1: 10, trader2: 5, trader3: 8)");
-        clob.placeLimitOrder(ledger, "trader1", "SELL", 0.50, 15);
-        log("FIFO test: Sell 15 @ $0.50 - should fill trader1 (10) then trader2 (5)");
+        clob.placeLimitOrder(newLedger, "trader1", "BUY", 0.50, 10);
+        clob.placeLimitOrder(newLedger, "trader2", "BUY", 0.50, 5);
+        clob.placeLimitOrder(newLedger, "trader3", "BUY", 0.50, 8);
+        clob.placeLimitOrder(newLedger, "trader1", "SELL", 0.50, 15);
         break;
     }
-    setLedger({ ...ledger });
+
+    setLedger(newLedger);
+    setLogs([]);
+    log(`Loaded ${preset} preset`);
+    setError("");
   }
 
   const marketData = getMarketData();
@@ -428,10 +444,10 @@ export default function CLOBTestPage() {
 
               {/* Asks */}
               <div className="max-h-48 overflow-y-auto">
-                {asks.slice().reverse().slice(0, 10).reverse().map((ask, i) => (
+                {asks.slice(-10).reverse().map((ask, i) => (
                   <div key={`ask-${i}`} className="grid grid-cols-3 gap-2 p-2 text-sm border-b border-gray-100 dark:border-gray-700 text-red-600">
                     <span className="text-right"></span>
-                    <span className="text-center font-medium">${ask.price.toFixed(2)}</span>
+                    <span className="text-center font-medium">${typeof ask.price === 'number' ? ask.price.toFixed(2) : ask.price}</span>
                     <span>{ask.totalQty}</span>
                   </div>
                 ))}
@@ -447,7 +463,7 @@ export default function CLOBTestPage() {
                 {bids.slice(0, 10).map((bid, i) => (
                   <div key={`bid-${i}`} className="grid grid-cols-3 gap-2 p-2 text-sm border-b border-gray-100 dark:border-gray-700 text-green-600">
                     <span className="text-right">{bid.totalQty}</span>
-                    <span className="text-center font-medium">${bid.price.toFixed(2)}</span>
+                    <span className="text-center font-medium">${typeof bid.price === 'number' ? bid.price.toFixed(2) : bid.price}</span>
                     <span></span>
                   </div>
                 ))}
@@ -487,9 +503,9 @@ export default function CLOBTestPage() {
                 openOrders.map((order) => (
                   <div key={order.orderId} className="flex justify-between p-2 border-b border-gray-100 dark:border-gray-700 text-xs">
                     <span className={order.side === "BUY" ? "text-green-600" : "text-red-600"}>
-                      {order.side} ${order.price.toFixed(2)}
+                      {order.side} ${typeof order.price === 'number' ? order.price.toFixed(2) : order.price}
                     </span>
-                    <span className="text-gray-500">ID:{order.orderId} | {order.qty} | {order.traderId}</span>
+                    <span className="text-gray-500">ID:{order.orderId} | {typeof order.qty === 'number' ? order.qty : order.qty.toFixed(0)} | {order.traderId}</span>
                   </div>
                 ))
               )}
