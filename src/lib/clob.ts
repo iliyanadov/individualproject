@@ -276,7 +276,29 @@ export class CLOBEngine {
   }
 
   getDepth(book: OrderBook, side: Side, ticks: number): Decimal {
+    // Returns the depth of orders on this side (bids for BUY, asks for SELL)
     let start = side === "BUY" ? book.bestBid : book.bestAsk;
+    let totalDepth = new Decimal(0);
+    let count = 0;
+
+    while (start && count < ticks) {
+      totalDepth = totalDepth.plus(start.totalQty);
+      start = start.next;
+      count++;
+    }
+
+    return totalDepth;
+  }
+
+  /**
+   * Get the depth of liquidity available to trade against (opposite side)
+   * For BUY orders, returns ask depth (orders to buy into)
+   * For SELL orders, returns bid depth (orders to sell into)
+   */
+  getLiquidityDepth(book: OrderBook, side: Side, ticks: number): Decimal {
+    // For BUY, we want ask depth (liquidity to buy into)
+    // For SELL, we want bid depth (liquidity to sell into)
+    let start = side === "BUY" ? book.bestAsk : book.bestBid;
     let totalDepth = new Decimal(0);
     let count = 0;
 

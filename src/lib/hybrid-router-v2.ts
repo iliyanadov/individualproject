@@ -43,6 +43,8 @@ export interface RoutingDecision {
   price: Decimal;
   /** Reason for routing choice */
   reason: string;
+  /** Status from the engine (OPEN, PARTIALLY_FILLED, FILLED, REJECTED) */
+  engineStatus?: "OPEN" | "PARTIALLY_FILLED" | "FILLED" | "REJECTED";
 }
 
 /**
@@ -57,6 +59,8 @@ export interface HybridRoutingResult {
   totalRemainingQty: Decimal;
   /** Average fill price across all engines */
   avgFillPrice: Decimal;
+  /** Final status of the order */
+  finalStatus: "OPEN" | "PARTIALLY_FILLED" | "FILLED" | "REJECTED";
 }
 
 /**
@@ -245,11 +249,19 @@ export class HybridRouterV2 implements UnifiedEngine {
         ? calcPriceImpact(priceBefore, priceAfter, intent.side)
         : null;
 
-      // Build result
-      const result: ExecutionResult = {
-        engineType: `HYBRID_V2(${routingResult.decisions.map(d => d.engine).join("+")})`,
-        intent,
-        status: routingResult.totalRemainingQty.eq(0) ? "FILLED" : "PARTIALLY_FILLED",
+      // Build result - only include engines that actually filled something
+        const usedEngines = routingResult.decisions
+          .filter(d => d.qty.gt(0))
+          .map(d => d.engine)
+          .join("+");
+        const engineType = usedEngines
+          ? `HYBRID_V2(${usedEngines})`
+          : "HYBRID_V2";
+
+        const result: ExecutionResult = {
+          engineType,
+          intent,
+        status: routingResult.finalStatus,
         fills,
         filledQty: routingResult.totalFilledQty,
         remainingQty: routingResult.totalRemainingQty,
@@ -271,6 +283,7 @@ export class HybridRouterV2 implements UnifiedEngine {
         timestamp,
       };
 
+      // Log routing decisions to internal log
       this.logRouting(intent, routingResult);
 
       return result;
@@ -302,19 +315,51 @@ export class HybridRouterV2 implements UnifiedEngine {
     let lastEngineUsed: "CLOB" | "LMSR" | undefined = undefined;
 
     // Based on routing mode, decide how to execute
+    // Note: For SELL orders, we only use CLOB (LMSR sell is equivalent to buying NO)
+    const isSell = intent.side === "SELL";
+
+    // Track the CLOB status to determine final status
+    let clobStatus: "OPEN" | "PARTIALLY_FILLED" | "FILLED" | "REJECTED" | null = null;
+    let clobRemainingOnBook = new Decimal(0);
+    // Track all affected traders (for position sync)
+    const affectedTraders = new Set<string>([intent.traderId]);
+
+    // CAPTURE BASELINE positions before execution for proper delta tracking
+    const baselinePositions = new Map<string, { cash: Decimal; yesShares: Decimal; noShares: Decimal }>();
+    for (const traderId of [intent.traderId]) {
+      const clobTrader = this.clobLedger.traders.get(traderId);
+      const lmsrTrader = this.lmsrLedger.traders.get(traderId);
+      const shared = this.sharedPositions.get(traderId);
+      if (shared) {
+        baselinePositions.set(traderId, {
+          cash: shared.cash,
+          yesShares: shared.yesShares,
+          noShares: shared.noShares,
+        });
+      }
+    }
+
     switch (this.config.routingMode) {
       case "CLOB_FIRST":
-        // Try CLOB first, then LMSR
+        // Try CLOB first, then LMSR (only for BUY orders)
         var clobResult = this.tryExecuteOnCLOB(intent, remainingQty);
         decisions.push(clobResult.decision);
         totalFilledQty = totalFilledQty.plus(clobResult.filledQty);
         totalValue = totalValue.plus(clobResult.value);
         remainingQty = remainingQty.minus(clobResult.filledQty);
+        clobStatus = clobResult.status;
+        clobRemainingOnBook = clobResult.remainingOnBook;
         if (clobResult.filledQty.gt(0)) {
           lastEngineUsed = "CLOB";
         }
+        // Track counterparties whose positions changed
+        for (const counterparty of clobResult.counterparties) {
+          affectedTraders.add(counterparty);
+        }
 
-        if (remainingQty.gt(0)) {
+        // For BUY orders, fall back to LMSR for remaining quantity
+        // For SELL orders, don't use LMSR (selling YES on LMSR = buying NO, which isn't what we want)
+        if (remainingQty.gt(0) && !isSell) {
           var lmsrResult = this.executeOnLMSR(intent, remainingQty);
           decisions.push(lmsrResult.decision);
           totalFilledQty = totalFilledQty.plus(lmsrResult.filledQty);
@@ -327,14 +372,17 @@ export class HybridRouterV2 implements UnifiedEngine {
         break;
 
       case "LMSR_FIRST":
-        // Try LMSR first, then CLOB
-        var lmsrResult = this.executeOnLMSR(intent, remainingQty);
-        decisions.push(lmsrResult.decision);
-        totalFilledQty = totalFilledQty.plus(lmsrResult.filledQty);
-        totalValue = totalValue.plus(lmsrResult.value);
-        remainingQty = remainingQty.minus(lmsrResult.filledQty);
-        if (lmsrResult.filledQty.gt(0)) {
-          lastEngineUsed = "LMSR";
+        // For BUY orders: Try LMSR first, then CLOB
+        // For SELL orders: Use CLOB only
+        if (!isSell) {
+          var lmsrResult = this.executeOnLMSR(intent, remainingQty);
+          decisions.push(lmsrResult.decision);
+          totalFilledQty = totalFilledQty.plus(lmsrResult.filledQty);
+          totalValue = totalValue.plus(lmsrResult.value);
+          remainingQty = remainingQty.minus(lmsrResult.filledQty);
+          if (lmsrResult.filledQty.gt(0)) {
+            lastEngineUsed = "LMSR";
+          }
         }
 
         if (remainingQty.gt(0)) {
@@ -343,8 +391,14 @@ export class HybridRouterV2 implements UnifiedEngine {
           totalFilledQty = totalFilledQty.plus(clobResult.filledQty);
           totalValue = totalValue.plus(clobResult.value);
           remainingQty = remainingQty.minus(clobResult.filledQty);
+          clobStatus = clobResult.status;
+          clobRemainingOnBook = clobResult.remainingOnBook;
           if (clobResult.filledQty.gt(0)) {
             lastEngineUsed = "CLOB";
+          }
+          // Track counterparties whose positions changed
+          for (const counterparty of clobResult.counterparties) {
+            affectedTraders.add(counterparty);
           }
         }
         break;
@@ -359,12 +413,19 @@ export class HybridRouterV2 implements UnifiedEngine {
           totalFilledQty = totalFilledQty.plus(clobResult.filledQty);
           totalValue = totalValue.plus(clobResult.value);
           remainingQty = remainingQty.minus(clobResult.filledQty);
+          clobStatus = clobResult.status;
+          clobRemainingOnBook = clobResult.remainingOnBook;
           if (clobResult.filledQty.gt(0)) {
             lastEngineUsed = "CLOB";
           }
+          // Track counterparties whose positions changed
+          for (const counterparty of clobResult.counterparties) {
+            affectedTraders.add(counterparty);
+          }
         }
 
-        if (remainingQty.gt(0)) {
+        // For BUY orders, fall back to LMSR if CLOB didn't fill completely
+        if (remainingQty.gt(0) && !isSell) {
           var lmsrResult = this.executeOnLMSR(intent, remainingQty);
           decisions.push(lmsrResult.decision);
           totalFilledQty = totalFilledQty.plus(lmsrResult.filledQty);
@@ -377,18 +438,39 @@ export class HybridRouterV2 implements UnifiedEngine {
         break;
     }
 
-    // Update shared position from engines, using last engine as primary source
-    this.syncPositionFromEngines(intent.traderId, lastEngineUsed);
+    // Update shared positions for all affected traders
+    // This includes both the order placer and any counterparties that traded
+    for (const traderId of affectedTraders) {
+      const baseline = baselinePositions.get(traderId);
+      this.syncPositionFromEngines(traderId, lastEngineUsed, baseline);
+    }
 
     const avgFillPrice = totalFilledQty.gt(0)
       ? totalValue.div(totalFilledQty)
       : new Decimal(0);
+
+    // Determine final status based on what actually happened
+    let finalStatus: "OPEN" | "PARTIALLY_FILLED" | "FILLED" | "REJECTED";
+    if (clobStatus === "OPEN" && totalFilledQty.eq(0)) {
+      // Order went on book with no fills
+      finalStatus = "OPEN";
+    } else if (remainingQty.eq(0)) {
+      // All requested quantity was filled (even if some remains on book as resting order)
+      finalStatus = "FILLED";
+    } else if (totalFilledQty.gt(0)) {
+      // Some quantity was filled but not all
+      finalStatus = "PARTIALLY_FILLED";
+    } else {
+      // No quantity was filled
+      finalStatus = "REJECTED";
+    }
 
     return {
       decisions,
       totalFilledQty,
       totalRemainingQty: remainingQty,
       avgFillPrice,
+      finalStatus,
     };
   }
 
@@ -399,6 +481,7 @@ export class HybridRouterV2 implements UnifiedEngine {
     const book = this.clobLedger.market.orderBook;
     const spread = this.clobEngine.getSpread(book);
     const maxSpread = this.config.maxSpread ?? 0.05;
+    const minDepth = this.config.minDepth ?? 0;
 
     // If spread is too wide, use LMSR
     if (spread && spread.gt(maxSpread)) {
@@ -413,6 +496,15 @@ export class HybridRouterV2 implements UnifiedEngine {
       }
     }
 
+    // For MARKET orders or aggressive orders, check if there's sufficient liquidity depth
+    // Skip depth check for limit orders that might rest on book
+    if (intent.orderType === "MARKET" && minDepth > 0) {
+      const depth = this.clobEngine.getLiquidityDepth(book, intent.side, 3);
+      if (depth.lt(minDepth)) {
+        return false; // Insufficient depth, use LMSR
+      }
+    }
+
     return true;
   }
 
@@ -423,9 +515,14 @@ export class HybridRouterV2 implements UnifiedEngine {
   private tryExecuteOnCLOB(
     intent: OrderIntent,
     qty: Decimal
-  ): { decision: RoutingDecision; filledQty: Decimal; value: Decimal; } {
+  ): { decision: RoutingDecision; filledQty: Decimal; value: Decimal; status: "OPEN" | "PARTIALLY_FILLED" | "FILLED" | "REJECTED"; remainingOnBook: Decimal; counterparties: Set<string>; } {
     const isBuying = intent.side === "BUY";
     const outcome = intent.outcome;
+    const counterparties = new Set<string>();
+
+    // PRE-SYNC: Before executing on CLOB, ensure the CLOB ledger has the trader's latest position
+    // This is important when a trader bought on LMSR and now wants to sell on CLOB
+    this.syncToCLOBLedger(intent.traderId);
 
     try {
       let clobResult;
@@ -454,17 +551,31 @@ export class HybridRouterV2 implements UnifiedEngine {
         this.stats.clobFillQty = this.stats.clobFillQty.plus(clobResult.filledQty);
       }
 
+      // Collect counterparties from trades
+      for (const trade of clobResult.trades) {
+        if (trade.bidTraderId !== intent.traderId) {
+          counterparties.add(trade.bidTraderId);
+        }
+        if (trade.askTraderId !== intent.traderId) {
+          counterparties.add(trade.askTraderId);
+        }
+      }
+
       return {
         decision: {
           engine: "CLOB",
           qty: clobResult.filledQty,
           price: clobResult.avgFillPrice,
+          engineStatus: clobResult.status,
           reason: clobResult.status === "REJECTED"
             ? clobResult.rejectionReason ?? "Rejected"
             : `Filled ${clobResult.filledQty} of ${qty}`,
         },
         filledQty: clobResult.filledQty,
         value: clobResult.filledQty.times(clobResult.avgFillPrice),
+        status: clobResult.status,
+        remainingOnBook: clobResult.remainingQty,
+        counterparties,
       };
     } catch (e) {
       return {
@@ -476,6 +587,9 @@ export class HybridRouterV2 implements UnifiedEngine {
         },
         filledQty: new Decimal(0),
         value: new Decimal(0),
+        status: "REJECTED",
+        remainingOnBook: new Decimal(0),
+        counterparties,
       };
     }
   }
@@ -593,7 +707,11 @@ export class HybridRouterV2 implements UnifiedEngine {
    * This captures changes made by either engine
    * @param lastEngineUsed - Which engine executed last (use as primary source)
    */
-  private syncPositionFromEngines(traderId: string, lastEngineUsed?: "CLOB" | "LMSR"): void {
+  private syncPositionFromEngines(
+    traderId: string,
+    lastEngineUsed?: "CLOB" | "LMSR",
+    baseline?: { cash: Decimal; yesShares: Decimal; noShares: Decimal }
+  ): void {
     const shared = this.sharedPositions.get(traderId);
     if (!shared) return;
 
@@ -606,7 +724,94 @@ export class HybridRouterV2 implements UnifiedEngine {
       shared.clobOpenOrders = clobTrader.openOrders;
     }
 
-    // Use the last-used engine as primary source for cash and shares
+    // The last engine used has the most up-to-date cash (reflects all trades in this order)
+    if (lastEngineUsed === "CLOB" && clobTrader) {
+      shared.cash = clobTrader.cash;
+    } else if (lastEngineUsed === "LMSR" && lmsrTrader) {
+      shared.cash = lmsrTrader.cash;
+    } else if (clobTrader) {
+      shared.cash = clobTrader.cash;
+    } else if (lmsrTrader) {
+      shared.cash = lmsrTrader.cash;
+    }
+
+    // For shares: use baseline to compute deltas, then add to baseline
+    const baselineYes = baseline?.yesShares ?? shared.yesShares;
+    const baselineNo = baseline?.noShares ?? shared.noShares;
+
+    // Calculate how much each engine added/removed
+    let clobDeltaYes = new Decimal(0);
+    let clobDeltaNo = new Decimal(0);
+    let lmsrDeltaYes = new Decimal(0);
+    let lmsrDeltaNo = new Decimal(0);
+
+    if (clobTrader) {
+      // CLOB shows delta from baseline (either positive or negative)
+      clobDeltaYes = clobTrader.yesShares.minus(baselineYes);
+      clobDeltaNo = clobTrader.noShares.minus(baselineNo);
+    }
+    if (lmsrTrader) {
+      // LMSR shows delta from baseline (either positive or negative)
+      lmsrDeltaYes = lmsrTrader.yesShares.minus(baselineYes);
+      lmsrDeltaNo = lmsrTrader.noShares.minus(baselineNo);
+    }
+
+    // Sum up all deltas and add to baseline
+    shared.yesShares = baselineYes.plus(clobDeltaYes).plus(lmsrDeltaYes);
+    shared.noShares = baselineNo.plus(clobDeltaNo).plus(lmsrDeltaNo);
+
+    // Sync full position back to both engines so they have complete view
+    if (clobTrader) {
+      clobTrader.cash = shared.cash;
+      clobTrader.yesShares = shared.yesShares;
+      clobTrader.noShares = shared.noShares;
+    }
+    if (lmsrTrader) {
+      lmsrTrader.cash = shared.cash;
+      lmsrTrader.yesShares = shared.yesShares;
+      lmsrTrader.noShares = shared.noShares;
+    }
+
+    shared.lastUpdate = Date.now();
+  }
+
+  /**
+   * Sync shared position to CLOB ledger before executing on CLOB
+   * This ensures that shares bought on LMSR are available for selling on CLOB
+   */
+  private syncToCLOBLedger(traderId: string): void {
+    const shared = this.sharedPositions.get(traderId);
+    if (!shared) return;
+
+    const clobTrader = this.clobLedger.traders.get(traderId);
+    if (!clobTrader) return;
+
+    // Sync shared position to CLOB ledger
+    clobTrader.cash = shared.cash;
+    clobTrader.yesShares = shared.yesShares;
+    clobTrader.noShares = shared.noShares;
+    // Note: Don't sync clobOpenOrders - that's CLOB-specific state
+  }
+
+  /**
+   * After multi-engine execution, aggregate positions from both engines
+   * This is needed because both CLOB and LMSR may have updated the trader's position
+   */
+  private aggregateAndSyncPositions(traderId: string, lastEngineUsed?: "CLOB" | "LMSR"): void {
+    const shared = this.sharedPositions.get(traderId);
+    if (!shared) return;
+
+    const clobTrader = this.clobLedger.traders.get(traderId);
+    const lmsrTrader = this.lmsrLedger.traders.get(traderId);
+
+    // Use CLOB's open orders
+    if (clobTrader) {
+      shared.clobOpenOrders = clobTrader.openOrders;
+    }
+
+    // Aggregate positions from both engines
+    // Cash and shares should be the same in both engines (after sync),
+    // so we can use either as source. Use the last-used engine for consistency.
     const primaryEngine = lastEngineUsed ?? "CLOB";
     const primaryTrader = primaryEngine === "CLOB" ? clobTrader : lmsrTrader;
 
@@ -616,7 +821,7 @@ export class HybridRouterV2 implements UnifiedEngine {
       shared.noShares = primaryTrader.noShares;
     }
 
-    // Sync to the other engine
+    // Ensure the other engine is synced to the same position
     if (primaryEngine === "CLOB" && lmsrTrader) {
       lmsrTrader.cash = shared.cash;
       lmsrTrader.yesShares = shared.yesShares;
@@ -735,7 +940,8 @@ export class HybridRouterV2 implements UnifiedEngine {
   }
 
   getDepth(side: Side, ticks: number): Decimal {
-    return this.clobEngine.getDepth(this.clobLedger.market.orderBook, side, ticks);
+    // Returns liquidity depth (opposite side) - for BUY, returns ask depth
+    return this.clobEngine.getLiquidityDepth(this.clobLedger.market.orderBook, side, ticks);
   }
 
   cancelOrder(orderId: string): ExecutionResult | null {
@@ -844,8 +1050,29 @@ export class HybridRouterV2 implements UnifiedEngine {
       data: { intentId: intent.intentId, ...intent },
     });
 
+    // Add routing decision logs
+    for (const decision of result.decisions) {
+      logs.push({
+        type: "ROUTING_DECISION",
+        timestamp: Date.now(),
+        engineType: this.engineType,
+        data: {
+          intentId: intent.intentId,
+          engine: decision.engine,
+          qty: decision.qty,
+          price: decision.price,
+          reason: decision.reason,
+        },
+      });
+    }
+
+    const logType = result.finalStatus === "OPEN" ? "ORDER_PLACED"
+      : result.finalStatus === "FILLED" ? "ORDER_FILLED"
+      : result.finalStatus === "PARTIALLY_FILLED" ? "ORDER_PARTIALLY_FILLED"
+      : "ORDER_REJECTED";
+
     logs.push({
-      type: result.totalRemainingQty.eq(0) ? "ORDER_FILLED" : "ORDER_PARTIALLY_FILLED",
+      type: logType,
       timestamp: Date.now(),
       engineType: this.engineType,
       data: {
