@@ -913,5 +913,12 @@ export function createEngine(type: string, config: EngineConfig): UnifiedEngine 
   }
 }
 
-// Re-export hybrid router functions
-export { createHybridEngine, createHybridConfig, HybridRouterEngine, HybridConfig } from "./hybrid-router";
+// Re-export hybrid router v2 functions and types
+export {
+  createHybridEngineV2 as createHybridEngine,
+  createHybridConfig,
+  HybridRouterV2,
+  createCLOBFirstConfig,
+  createSpreadBasedConfig,
+} from "./hybrid-router-v2";
+export type { HybridConfigV2 as HybridConfig } from "./hybrid-router-v2";

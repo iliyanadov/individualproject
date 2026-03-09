@@ -96,6 +96,8 @@ export interface HybridConfigV2 extends EngineConfig {
   maxSpread?: number;
   /** For SPREAD_BASED: minimum depth to use CLOB */
   minDepth?: number;
+  /** Number of ticks to check for depth */
+  depthTicks?: number;
 }
 
 // ============================================================================
@@ -1128,12 +1130,13 @@ export class HybridRouterV2 implements UnifiedEngine {
 // Factory Functions
 // ============================================================================
 
-export function createHybridEngineV2(config: Partial<HybridConfigV2> = {}): HybridRouterV2 {
+export function createHybridEngineV2(config: Omit<Partial<HybridConfigV2>, 'type'> = {}): HybridRouterV2 {
   const fullConfig: HybridConfigV2 = {
     type: "HYBRID_V2",
     routingMode: config.routingMode ?? "CLOB_FIRST",
     maxSpread: config.maxSpread ?? 0.05,
     minDepth: config.minDepth ?? 10,
+    depthTicks: config.depthTicks ?? 3,
     clobConfig: config.clobConfig ?? {},
     lmsrConfig: config.lmsrConfig ?? { b: 100 },
   };
@@ -1144,11 +1147,12 @@ export function createHybridEngineV2(config: Partial<HybridConfigV2> = {}): Hybr
 /**
  * Create a CLOB-first hybrid config (tries CLOB, falls back to LMSR)
  */
-export function createCLOBFirstConfig(): Partial<HybridConfigV2> {
+export function createCLOBFirstConfig(): Omit<Partial<HybridConfigV2>, 'type'> {
   return {
     routingMode: "CLOB_FIRST",
     maxSpread: 0.05,
     minDepth: 10,
+    depthTicks: 3,
     lmsrConfig: { b: 100 },
   };
 }
@@ -1156,11 +1160,37 @@ export function createCLOBFirstConfig(): Partial<HybridConfigV2> {
 /**
  * Create a spread-based hybrid config (uses CLOB when spread is tight)
  */
-export function createSpreadBasedConfig(maxSpread: number = 0.03): Partial<HybridConfigV2> {
+export function createSpreadBasedConfig(maxSpread: number = 0.03): Omit<Partial<HybridConfigV2>, 'type'> {
   return {
     routingMode: "SPREAD_BASED",
     maxSpread,
     minDepth: 5,
+    depthTicks: 3,
     lmsrConfig: { b: 100 },
+  };
+}
+
+/**
+ * Create a hybrid config (for backward compatibility with v1)
+ * Maps v1-style config to v2's Partial<HybridConfigV2>
+ */
+export function createHybridConfig(params: {
+  spreadThreshold?: number;
+  depthThreshold?: number;
+  depthTicks?: number;
+  b?: number;
+  tickSize?: number;
+}): Omit<Partial<HybridConfigV2>, 'type'> {
+  return {
+    routingMode: "SPREAD_BASED",
+    maxSpread: params.spreadThreshold ?? 0.05,
+    minDepth: params.depthThreshold ?? 10,
+    depthTicks: params.depthTicks ?? 3,
+    clobConfig: {
+      tickSize: params.tickSize ?? 0.01,
+    },
+    lmsrConfig: {
+      b: params.b ?? 100,
+    },
   };
 }

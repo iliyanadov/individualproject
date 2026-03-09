@@ -13,7 +13,7 @@ import { join } from "path";
 import { Decimal } from "decimal.js";
 import { SimulationRunner, ScenarioConfig, ScenarioType, exportSimulationToCSV, exportSimulationToJSON } from "../src/lib/simulation";
 import { createEngine, createHybridEngine, createHybridConfig } from "../src/lib/engine-adapters";
-import { createHybridConfig as createHybridRouterConfig } from "../src/lib/hybrid-router";
+import { createHybridConfig as createHybridRouterConfig } from "../src/lib/hybrid-router-v2";
 
 // ============================================================================
 // Configuration
