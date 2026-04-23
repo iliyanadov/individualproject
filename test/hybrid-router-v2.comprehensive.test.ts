@@ -3,7 +3,7 @@
  *
  * Test coverage:
  * 1. Routing correctness (decision logic in isolation)
- * 2. Fallback behavior (CLOB_FIRST/LMSR_FIRST partial fills)
+ * 2. Fallback behavior (CLOB partial fills spill to LMSR)
  * 3. Shared position/ledger invariants
  * 4. Sync correctness (single source of truth)
  * 5. Determinism (same seed = same output)
@@ -17,7 +17,6 @@ import { Decimal } from "decimal.js";
 import {
   HybridRouterV2,
   createHybridEngineV2,
-  createCLOBFirstConfig,
   createSpreadBasedConfig,
   SharedTraderPosition,
 } from "../src/lib/hybrid-router-v2";
@@ -65,7 +64,6 @@ describe("HybridRouterV2: Routing Correctness", () => {
   describe("Empty/one-sided CLOB should use LMSR", () => {
     it("should route to LMSR when CLOB is empty", () => {
       const engine = createHybridEngineV2({
-        routingMode: "SPREAD_BASED",
         maxSpread: 0.05,
         minDepth: 10,
       });
@@ -82,7 +80,6 @@ describe("HybridRouterV2: Routing Correctness", () => {
 
     it("should route to LMSR when CLOB has only asks (no bids for buy order)", () => {
       const engine = createHybridEngineV2({
-        routingMode: "SPREAD_BASED",
         maxSpread: 0.05,
         minDepth: 10,
       });
@@ -107,7 +104,6 @@ describe("HybridRouterV2: Routing Correctness", () => {
   describe("Spread threshold routing", () => {
     it("should choose CLOB when spread ≤ threshold", () => {
       const engine = createHybridEngineV2({
-        routingMode: "SPREAD_BASED",
         maxSpread: 0.05, // 5% threshold
       });
       engine.initialize();
@@ -132,7 +128,6 @@ describe("HybridRouterV2: Routing Correctness", () => {
 
     it("should choose LMSR when spread > threshold", () => {
       const engine = createHybridEngineV2({
-        routingMode: "SPREAD_BASED",
         maxSpread: 0.01, // 1% threshold
       });
       engine.initialize();
@@ -157,7 +152,6 @@ describe("HybridRouterV2: Routing Correctness", () => {
 
     it("should be deterministic at boundary (spread = threshold)", () => {
       const engine = createHybridEngineV2({
-        routingMode: "SPREAD_BASED",
         maxSpread: 0.02,
       });
       engine.initialize();
@@ -183,7 +177,6 @@ describe("HybridRouterV2: Routing Correctness", () => {
   describe("Depth threshold routing", () => {
     it("should check depth within specified ticks", () => {
       const engine = createHybridEngineV2({
-        routingMode: "SPREAD_BASED",
         maxSpread: 0.10,
         minDepth: 50, // Need at least 50 shares depth
       });
@@ -212,7 +205,6 @@ describe("HybridRouterV2: Routing Correctness", () => {
 
     it("should use LMSR when depth < threshold", () => {
       const engine = createHybridEngineV2({
-        routingMode: "SPREAD_BASED",
         maxSpread: 0.10,
         minDepth: 100, // Need 100 shares
       });
@@ -241,9 +233,9 @@ describe("HybridRouterV2: Routing Correctness", () => {
 // ============================================================================
 
 describe("HybridRouterV2: Fallback Behavior", () => {
-  describe("CLOB_FIRST partial fill fallback", () => {
+  describe("CLOB partial fill spills to LMSR", () => {
     it("should fill k on CLOB and route qty-k to LMSR", () => {
-      const engine = createHybridEngineV2(createCLOBFirstConfig());
+      const engine = createHybridEngineV2(createSpreadBasedConfig());
       engine.initialize();
       engine.addTrader("alice", 10000);
       engine.addTrader("bob", 10000);
@@ -266,7 +258,7 @@ describe("HybridRouterV2: Fallback Behavior", () => {
     });
 
     it("should produce exactly k filled on CLOB when available", () => {
-      const engine = createHybridEngineV2(createCLOBFirstConfig());
+      const engine = createHybridEngineV2(createSpreadBasedConfig());
       engine.initialize();
       engine.addTrader("alice", 10000);
       engine.addTrader("bob", 10000);
@@ -289,7 +281,7 @@ describe("HybridRouterV2: Fallback Behavior", () => {
     });
 
     it("should route remainder to LMSR after CLOB partial fill", () => {
-      const engine = createHybridEngineV2(createCLOBFirstConfig());
+      const engine = createHybridEngineV2(createSpreadBasedConfig());
       engine.initialize();
       engine.addTrader("alice", 10000);
       engine.addTrader("bob", 10000);
@@ -310,7 +302,7 @@ describe("HybridRouterV2: Fallback Behavior", () => {
     });
 
     it("should not double-fill or lose remainder", () => {
-      const engine = createHybridEngineV2(createCLOBFirstConfig());
+      const engine = createHybridEngineV2(createSpreadBasedConfig());
       engine.initialize();
       engine.addTrader("alice", 10000);
       engine.addTrader("bob", 10000);
@@ -333,52 +325,6 @@ describe("HybridRouterV2: Fallback Behavior", () => {
       expect(totalRouted).toBe(100);
     });
   });
-
-  describe("LMSR_FIRST partial fill fallback", () => {
-    it("should use LMSR first for buy orders (LMSR can fill any qty)", () => {
-      const engine = createHybridEngineV2({
-        routingMode: "LMSR_FIRST",
-      });
-      engine.initialize();
-      engine.addTrader("alice", 10000);
-      engine.addTrader("bob", 10000);
-
-      // Set up CLOB liquidity
-      bootstrapShares(engine, "alice", 100);
-      engine.processOrder(createIntent("ask-1", "alice", "SELL", "LIMIT", 0.50, 100, 0));
-
-      // Bob buys 200 - LMSR should fill all (it's a market maker)
-      const buyIntent = createIntent("buy-1", "bob", "BUY", "MARKET", undefined, 200, 1);
-      const result = engine.processOrder(buyIntent);
-
-      expect(result.status).toBe("FILLED");
-      expect(result.filledQty.toNumber()).toBe(200);
-      expect(result.engineType).toContain("LMSR");
-      // LMSR fills everything, so CLOB is not used
-      expect(result.engineType).not.toContain("CLOB");
-    });
-
-    it("should use CLOB for sell orders in LMSR_FIRST mode", () => {
-      const engine = createHybridEngineV2({
-        routingMode: "LMSR_FIRST",
-      });
-      engine.initialize();
-      engine.addTrader("alice", 10000);
-      engine.addTrader("bob", 10000);
-
-      // Bootstrap Alice with shares
-      bootstrapShares(engine, "alice", 100);
-
-      // Bob places a SELL order on CLOB (not a buy - sells don't use LMSR first)
-      // Actually, to test CLOB sells, we need to set up differently
-      // Let's just verify that sell orders use CLOB, not LMSR
-      engine.processOrder(createIntent("ask-1", "alice", "SELL", "LIMIT", 0.50, 50, 0));
-
-      // Alice's sell order should be on CLOB book (OPEN)
-      const alicePos = engine.getSharedPositions().get("alice")!;
-      expect(alicePos.clobOpenOrders.size).toBe(1);
-    });
-  });
 });
 
 // ============================================================================
@@ -389,7 +335,7 @@ describe("HybridRouterV2: Ledger Invariants", () => {
   let engine: HybridRouterV2;
 
   beforeEach(() => {
-    engine = createHybridEngineV2(createCLOBFirstConfig());
+    engine = createHybridEngineV2(createSpreadBasedConfig());
     engine.initialize();
     engine.addTrader("alice", 10000);
     engine.addTrader("bob", 10000);
@@ -492,7 +438,7 @@ describe("HybridRouterV2: Sync Correctness", () => {
   let engine: HybridRouterV2;
 
   beforeEach(() => {
-    engine = createHybridEngineV2(createCLOBFirstConfig());
+    engine = createHybridEngineV2(createSpreadBasedConfig());
     engine.initialize();
     engine.addTrader("alice", 10000);
     engine.addTrader("bob", 10000);
@@ -576,8 +522,8 @@ describe("HybridRouterV2: Sync Correctness", () => {
 
 describe("HybridRouterV2: Determinism", () => {
   it("should produce identical results with same seed", () => {
-    const config1 = createCLOBFirstConfig();
-    const config2 = createCLOBFirstConfig();
+    const config1 = createSpreadBasedConfig();
+    const config2 = createSpreadBasedConfig();
 
     // Ensure same seed behavior
     const engine1 = createHybridEngineV2({ ...config1, type: "HYBRID_V2" as any });
@@ -621,7 +567,7 @@ describe("HybridRouterV2: Determinism", () => {
   });
 
   it("should produce deterministic routing decisions", () => {
-    const engine = createHybridEngineV2(createCLOBFirstConfig());
+    const engine = createHybridEngineV2(createSpreadBasedConfig());
     engine.initialize();
     engine.addTrader("alice", 10000);
 
@@ -659,7 +605,7 @@ describe("HybridRouterV2: Determinism", () => {
 
 describe("HybridRouterV2: No-Regret Sanity Checks", () => {
   it("should use CLOB when price is better than LMSR", () => {
-    const engine = createHybridEngineV2(createCLOBFirstConfig());
+    const engine = createHybridEngineV2(createSpreadBasedConfig());
     engine.initialize();
     engine.addTrader("alice", 10000);
     engine.addTrader("bob", 10000);
@@ -678,7 +624,7 @@ describe("HybridRouterV2: No-Regret Sanity Checks", () => {
   });
 
   it("should not unnecessarily route to LMSR when CLOB has sufficient liquidity", () => {
-    const engine = createHybridEngineV2(createCLOBFirstConfig());
+    const engine = createHybridEngineV2(createSpreadBasedConfig());
     engine.initialize();
     engine.addTrader("alice", 10000);
     engine.addTrader("bob", 10000);
@@ -724,8 +670,8 @@ describe("HybridRouterV2: No-Regret Sanity Checks", () => {
 describe("HybridRouterV2: Golden Regression Tests", () => {
   const goldenTestCases = [
     {
-      name: "CLOB_FIRST with thin liquidity",
-      config: createCLOBFirstConfig(),
+      name: "SPREAD_BASED with thin liquidity",
+      config: createSpreadBasedConfig(),
       setup: (engine: HybridRouterV2) => {
         engine.initialize();
         engine.addTrader("alice", 10000);
@@ -873,7 +819,7 @@ describe("HybridRouterV2: Property-Based Invariants", () => {
 
     for (const tc of testCases) {
       it(`seed ${tc.seed}, ${tc.orders} orders maintains invariants`, () => {
-        const engine = createHybridEngineV2(createCLOBFirstConfig());
+        const engine = createHybridEngineV2(createSpreadBasedConfig());
         engine.initialize();
 
         // Bootstrap with shares for selling
@@ -906,7 +852,7 @@ describe("HybridRouterV2: Property-Based Invariants", () => {
   });
 
   it("should never cross the CLOB book", () => {
-    const engine = createHybridEngineV2(createCLOBFirstConfig());
+    const engine = createHybridEngineV2(createSpreadBasedConfig());
     engine.initialize();
     engine.addTrader("alice", 10000);
     engine.addTrader("bob", 10000);
@@ -927,7 +873,7 @@ describe("HybridRouterV2: Property-Based Invariants", () => {
   });
 
   it("should never create or lose value", () => {
-    const engine = createHybridEngineV2(createCLOBFirstConfig());
+    const engine = createHybridEngineV2(createSpreadBasedConfig());
     engine.initialize();
     engine.addTrader("alice", 10000);
     engine.addTrader("bob", 10000);

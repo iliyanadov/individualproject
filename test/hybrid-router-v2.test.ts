@@ -13,7 +13,6 @@ import { Decimal } from "decimal.js";
 import {
   HybridRouterV2,
   createHybridEngineV2,
-  createCLOBFirstConfig,
   createSpreadBasedConfig,
 } from "../src/lib/hybrid-router-v2";
 import { OrderIntent } from "../src/lib/engine-common";
@@ -42,11 +41,11 @@ describe("HybridRouterV2: Initialization", () => {
   });
 });
 
-describe("HybridRouterV2: CLOB_FIRST Routing", () => {
+describe("HybridRouterV2: Spread-Based Routing", () => {
   let engine: HybridRouterV2;
 
   beforeEach(() => {
-    engine = createHybridEngineV2(createCLOBFirstConfig());
+    engine = createHybridEngineV2(createSpreadBasedConfig());
     engine.initialize();
     engine.addTrader("alice", 10000);
     engine.addTrader("bob", 10000);
@@ -155,7 +154,7 @@ describe("HybridRouterV2: Sell-to-Close with Shared Positions", () => {
   let engine: HybridRouterV2;
 
   beforeEach(() => {
-    engine = createHybridEngineV2(createCLOBFirstConfig());
+    engine = createHybridEngineV2(createSpreadBasedConfig());
     engine.initialize();
     engine.addTrader("alice", 10000);
     engine.addTrader("bob", 10000);
@@ -319,7 +318,7 @@ describe("HybridRouterV2: Statistics", () => {
   let engine: HybridRouterV2;
 
   beforeEach(() => {
-    engine = createHybridEngineV2(createCLOBFirstConfig());
+    engine = createHybridEngineV2(createSpreadBasedConfig());
     engine.initialize();
     engine.addTrader("alice", 10000);
     engine.addTrader("bob", 10000);
@@ -437,7 +436,7 @@ describe("HybridRouterV2: Market Data", () => {
   let engine: HybridRouterV2;
 
   beforeEach(() => {
-    engine = createHybridEngineV2(createCLOBFirstConfig());
+    engine = createHybridEngineV2(createSpreadBasedConfig());
     engine.initialize();
     engine.addTrader("alice", 10000);
     engine.addTrader("bob", 10000);

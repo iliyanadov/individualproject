@@ -107,8 +107,10 @@ export interface SimulationMetrics {
   totalVolume: Decimal;
   /** Total value traded */
   totalValue: Decimal;
-  /** Fill ratio (0-1) */
+  /** Fill ratio by orders (filledOrders / totalOrders) - measures availability */
   fillRatio: Decimal;
+  /** Fill ratio by volume (totalVolume / totalRequestedQty) - measures execution quality */
+  volumeFillRatio: Decimal;
   /** Average slippage per order */
   avgSlippage: Decimal;
   /** Average price impact per order */
@@ -291,35 +293,40 @@ export class OrderIntentGenerator {
     const arrivalRate = this.config.baseArrivalRate * 0.5; // Lower arrival rate
 
     let currentTime = 0;
-    const timeBetweenOrders = 1000 / arrivalRate;
 
-    for (let i = 0; i < numOrders; i++) {
+    // Phase 1: Seed initial liquidity with ONLY BUY orders
+    // This builds the bid side without needing traders to have shares
+    const seedOrders = Math.min(Math.floor(numOrders * 0.15), 15);
+
+    for (let i = 0; i < seedOrders; i++) {
+      const traderId = this.traders[i % this.traders.length];
+      const qty = this.rng.randomFloat(orderSizeMin, orderSizeMax);
+      // Vary price around 0.50 to create depth
+      const price = 0.50 - this.rng.randomFloat(0.01, 0.08); // Bids below 0.50
+
+      orders.push(this.createIntent(traderId, "YES", "BUY", "LIMIT", price, qty, currentTime));
+      currentTime += Math.floor(this.rng.randomExp(arrivalRate) * 300);
+    }
+
+    // Phase 2: Generate mixed orders with BUY bias
+    for (let i = seedOrders; i < numOrders; i++) {
       const traderId = this.rng.randomChoice(this.traders);
       const outcome = this.rng.randomChoice<Outcome>(["YES", "NO"]);
-      const side = this.rng.randomChoice<Side>(["BUY", "SELL"]);
-      const orderType = this.rng.randomChoice<OrderType>(["LIMIT", "LIMIT", "MARKET"]); // Mostly limit orders
+
+      // Bias towards BUY (75% BUY, 25% SELL) to maintain liquidity
+      const side = this.rng.random() < 0.75 ? "BUY" : "SELL";
+
+      const orderType = this.rng.randomChoice<OrderType>(["LIMIT", "LIMIT", "MARKET"]);
       const qty = this.rng.randomFloat(orderSizeMin, orderSizeMax);
 
       let price: number | undefined;
       if (orderType === "LIMIT") {
-        // Wider price spread
         const basePrice = 0.50;
         price = this.rng.randomFloat(basePrice - priceSpread, basePrice + priceSpread);
         price = Math.max(0.01, Math.min(0.99, price));
       }
 
-      const intent = this.createIntent(
-        traderId,
-        outcome,
-        side,
-        orderType,
-        price,
-        qty,
-        currentTime
-      );
-      orders.push(intent);
-
-      // Next order time with Poisson-like variability
+      orders.push(this.createIntent(traderId, outcome, side, orderType, price, qty, currentTime));
       currentTime += Math.floor(this.rng.randomExp(arrivalRate) * 1000);
       if (currentTime >= timeWindow) break;
     }
@@ -330,42 +337,34 @@ export class OrderIntentGenerator {
   private generateThickLiquidity(): OrderIntent[] {
     const orders: OrderIntent[] = [];
     const orderSizeMin = this.config.orderSizeMin || 1;
-    const orderSizeMax = this.config.orderSizeMax || 50; // Larger sizes
-    const priceSpread = this.config.priceSpread || 0.02; // Tighter spread
+    const orderSizeMax = this.config.orderSizeMax || 50;
+    const priceSpread = this.config.priceSpread || 0.02;
     const numOrders = this.config.numOrders;
     const timeWindow = this.config.timeWindow;
-    const arrivalRate = this.config.baseArrivalRate * 2.0; // Higher arrival rate
+    const arrivalRate = this.config.baseArrivalRate * 2.0;
 
     let currentTime = 0;
 
+    // For THICK liquidity, use 100% CROSSING limit orders
+    // Bids above 0.50, asks below 0.50 - these will immediately match with opposite side
+    // This creates high fill ratio by ensuring every order can find a match
     for (let i = 0; i < numOrders; i++) {
-      const traderId = this.rng.randomChoice(this.traders);
+      const traderId = this.traders[i % this.traders.length];
       const outcome = this.rng.randomChoice<Outcome>(["YES", "NO"]);
-      const side = this.rng.randomChoice<Side>(["BUY", "SELL"]);
-      const orderType = this.rng.randomChoice<OrderType>(["LIMIT", "LIMIT", "MARKET"]);
-      const qty = this.rng.randomFloat(orderSizeMin, orderSizeMax);
+      const side = this.rng.random() < 0.5 ? "BUY" : "SELL";
+      const qty = this.rng.randomFloat(1, 15);
 
-      let price: number | undefined;
-      if (orderType === "LIMIT") {
-        // Tighter price spread
-        const basePrice = 0.50;
-        price = this.rng.randomFloat(basePrice - priceSpread, basePrice + priceSpread);
-        price = Math.max(0.01, Math.min(0.99, price));
+      // Use crossing prices that guarantee immediate fills
+      let price: number;
+      if (side === "BUY") {
+        // Bid above mid - will match with existing asks
+        price = 0.50 + this.rng.randomFloat(0.01, 0.05);
+      } else {
+        // Ask below mid - will match with existing bids
+        price = 0.50 - this.rng.randomFloat(0.01, 0.05);
       }
 
-      const intent = this.createIntent(
-        traderId,
-        outcome,
-        side,
-        orderType,
-        price,
-        qty,
-        currentTime
-      );
-      orders.push(intent);
-
-      // Higher arrival rate = smaller gaps
-      const timeBetweenOrders = 1000 / arrivalRate;
+      orders.push(this.createIntent(traderId, outcome, side, "LIMIT", price, qty, currentTime));
       currentTime += Math.floor(this.rng.randomExp(arrivalRate) * 1000);
       if (currentTime >= timeWindow) break;
     }
@@ -384,12 +383,23 @@ export class OrderIntentGenerator {
     let currentTime = 0;
     let shocked = false;
     let basePrice = 0.50;
-
-    // Use a secondary RNG for shock decisions
     const shockRng = this.rng.fork();
 
-    for (let i = 0; i < numOrders; i++) {
-      // Check if we should apply shock
+    // Phase 1: Seed with BUY orders only
+    const seedOrders = Math.min(Math.floor(numOrders * 0.12), 25);
+
+    for (let i = 0; i < seedOrders; i++) {
+      const traderId = this.traders[i % this.traders.length];
+      const qty = this.rng.randomFloat(1, 10);
+      const price = basePrice - this.rng.randomFloat(0.01, 0.03);
+
+      orders.push(this.createIntent(traderId, "YES", "BUY", "LIMIT", price, qty, currentTime));
+      currentTime += Math.floor(this.rng.randomExp(this.config.baseArrivalRate) * 300);
+    }
+
+    // Phase 2: Mixed orders with BUY bias
+    for (let i = seedOrders; i < numOrders; i++) {
+      // Check for shock
       if (currentTime >= shockTime && !shocked) {
         if (shockRng.random() < shockProbability) {
           basePrice += shockMagnitude;
@@ -399,29 +409,18 @@ export class OrderIntentGenerator {
 
       const traderId = this.rng.randomChoice(this.traders);
       const outcome = this.rng.randomChoice<Outcome>(["YES", "NO"]);
-      const side = this.rng.randomChoice<Side>(["BUY", "SELL"]);
+      const side = this.rng.random() < 0.7 ? "BUY" : "SELL"; // 70% BUY
       const orderType = this.rng.randomChoice<OrderType>(["LIMIT", "LIMIT", "LIMIT", "MARKET"]);
       const qty = this.rng.randomFloat(1, 20);
 
       let price: number | undefined;
       if (orderType === "LIMIT") {
-        // Prices relative to current base (before or after shock)
         const spread = 0.05;
         price = this.rng.randomFloat(basePrice - spread, basePrice + spread);
         price = Math.max(0.01, Math.min(0.99, price));
       }
 
-      const intent = this.createIntent(
-        traderId,
-        outcome,
-        side,
-        orderType,
-        price,
-        qty,
-        currentTime
-      );
-      orders.push(intent);
-
+      orders.push(this.createIntent(traderId, outcome, side, orderType, price, qty, currentTime));
       currentTime += Math.floor(this.rng.randomExp(this.config.baseArrivalRate) * 1000);
       if (currentTime >= timeWindow) break;
     }
@@ -442,6 +441,43 @@ export class SimulationRunner {
   }
 
   /**
+   * Initialize all traders with starting cash from scenario config
+   * For CLOB, also pre-seed some traders with shares so they can sell
+   */
+  private initializeTraders(config: ScenarioConfig): void {
+    const generator = new OrderIntentGenerator(config);
+    const traderIds = Array.from({ length: config.numTraders }, (_, i) => `trader-${i + 1}`);
+
+    for (const traderId of traderIds) {
+      this.engine.addTrader(traderId, config.initialCash);
+    }
+
+    // For CLOB-backed engines, pre-seed some traders with YES/NO shares so
+    // early SELL LIMIT orders can execute. Applies to pure CLOB and to the
+    // hybrid router (whose CLOB leg also needs resting inventory); pure LMSR
+    // mints shares via the cost function and needs no seeding.
+    const engineType = this.engine.engineType;
+    const needsShareSeeding = engineType === "CLOB" || engineType === "HYBRID_V2";
+    if (needsShareSeeding) {
+      // Seed 30% of traders with YES shares, and 30% with NO shares
+      const numYesTraders = Math.max(2, Math.floor(config.numTraders * 0.3));
+      const numNoTraders = Math.max(2, Math.floor(config.numTraders * 0.3));
+
+      for (let i = 0; i < numYesTraders; i++) {
+        const traderId = traderIds[i];
+        // Give them 100 YES shares (worth ~$50 at $0.50)
+        this.engine.creditShares(traderId, "YES", 100);
+      }
+
+      for (let i = 0; i < numNoTraders; i++) {
+        const traderId = traderIds[(i + Math.floor(config.numTraders / 2)) % config.numTraders];
+        // Give them 100 NO shares
+        this.engine.creditShares(traderId, "NO", 100);
+      }
+    }
+  }
+
+  /**
    * Run a complete simulation
    */
   async run(config: ScenarioConfig): Promise<SimulationOutput> {
@@ -455,19 +491,23 @@ export class SimulationRunner {
     this.engine.initialize();
     this.engine.clearLogs();
 
+    // Initialize all traders with starting cash
+    this.initializeTraders(config);
+
     const results: ExecutionResult[] = [];
     const snapshots: MarketStateSnapshot[] = [];
     const allLogs: LogEntry[] = [];
 
     // Process each order
     for (const intent of intents) {
-      // Get state before processing
-      const stateBefore = this.engine.getMarketState();
-      snapshots.push({ ...stateBefore, timestamp: intent.timestamp });
-
-      // Process the order
+      // Process the order first
       const result = this.engine.processOrder(intent);
       results.push(result);
+
+      // Get state AFTER processing - this reflects the market's current implied price
+      // after incorporating the order's information
+      const stateAfter = this.engine.getMarketState();
+      snapshots.push({ ...stateAfter, timestamp: intent.timestamp });
 
       // Collect logs
       const logs = this.engine.getLogs();
@@ -511,20 +551,26 @@ export class SimulationRunner {
     this.engine.initialize();
     this.engine.clearLogs();
 
+    // Initialize all traders with starting cash
+    this.initializeTraders(config);
+
     const results: ExecutionResult[] = [];
     const snapshots: MarketStateSnapshot[] = [];
     const allLogs: LogEntry[] = [];
 
     for (const intent of intents) {
-      const stateBefore = this.engine.getMarketState();
-      snapshots.push({ ...stateBefore, timestamp: intent.timestamp });
-
+      // Process the order first
       const result = this.engine.processOrder(intent);
       results.push(result);
 
+      // Collect logs from this order
       const logs = this.engine.getLogs();
       allLogs.push(...logs);
       this.engine.clearLogs();
+
+      // Get state AFTER processing - this reflects the market's current implied price
+      const stateAfter = this.engine.getMarketState();
+      snapshots.push({ ...stateAfter, timestamp: intent.timestamp });
     }
 
     const finalState = this.engine.getMarketState();
@@ -606,8 +652,35 @@ export class SimulationRunner {
       volumePerTrader.set(traderId, currentVol.plus(result.filledQty));
     }
 
-    const fillRatio = totalOrders > 0
-      ? totalVolume.div(new Decimal(intents.reduce((sum, r) => sum + (r.qty ?? 0), 0)))
+    // Calculate fill ratio
+    // For LMSR: use order-based ratio (filledOrders / totalOrders) since the cost function
+    // means filledQty < requestedQty is expected behavior
+    // For CLOB: use volume-based ratio as before
+    let fillRatio: Decimal;
+    if (this.engine.engineType === "LMSR") {
+      // LMSR always executes orders but quantity may be less than requested
+      // due to price impact, so we measure by % of orders executed
+      fillRatio = totalOrders > 0 ? new Decimal(filledOrders).div(totalOrders) : new Decimal(0);
+    } else {
+      // For CLOB and others, use volume-based ratio
+      fillRatio = totalOrders > 0
+        ? totalVolume.div(new Decimal(intents.reduce((sum, r) => {
+            const qty = r.qty ?? 0;
+            const qtyNum = typeof qty === "number" ? qty : qty.toNumber();
+            return sum + qtyNum;
+          }, 0)))
+        : new Decimal(0);
+    }
+
+    // Volume-based fill ratio (totalVolume / totalRequestedQty)
+    // This measures execution quality - how much of requested quantity was actually filled
+    // For LMSR, this will be < 1.0 due to price impact; for CLOB, it depends on liquidity
+    const volumeFillRatio = totalOrders > 0
+      ? totalVolume.div(new Decimal(intents.reduce((sum, r) => {
+          const qty = r.qty ?? 0;
+          const qtyNum = typeof qty === "number" ? qty : qty.toNumber();
+          return sum + qtyNum;
+        }, 0)))
       : new Decimal(0);
 
     const avgSlippage = slippages.length > 0
@@ -648,6 +721,7 @@ export class SimulationRunner {
       totalVolume,
       totalValue,
       fillRatio,
+      volumeFillRatio,
       avgSlippage,
       avgPriceImpact,
       twaSlippage,

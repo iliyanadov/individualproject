@@ -561,6 +561,10 @@ export class CLOBEngine {
     const trader = ledger.traders.get(incomingTraderId)!;
 
     // ===== SELL-TO-CLOSE VALIDATION =====
+    // In prediction markets, you can only sell shares you own (no naked short selling).
+    // To express a bearish view on YES, traders should BUY NO instead of SELL YES.
+    // The adapter layer handles the NO/YES conversion for short-equivalent orders.
+
     // Calculate how many shares this trader has in open sell orders
     let openSellQty = new Decimal(0);
     for (const [, level] of ledger.market.orderBook.asks) {
@@ -680,6 +684,7 @@ export class CLOBEngine {
     let filledQty = new Decimal(0);
 
     // ===== SELL-TO-CLOSE VALIDATION =====
+    // In prediction markets, you can only sell shares you own (no naked short selling).
     const trader = ledger.traders.get(incomingTraderId)!;
     if (qty.gt(trader.yesShares)) {
       throw new Error(`Insufficient shares for market sell. Have: ${trader.yesShares}, Trying to sell: ${qty}`);

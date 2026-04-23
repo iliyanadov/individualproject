@@ -244,6 +244,122 @@ export class BinaryLMSR {
     };
   }
 
+  quoteQtySell(state: MarketState, outcome: Outcome, qty: number | Decimal): QuoteQty {
+    if (state.settled) {
+      throw new Error("Cannot quote in settled market");
+    }
+    const qtyD = qty instanceof Decimal ? qty : new Decimal(qty);
+    if (qtyD.lte(0)) {
+      throw new Error("Quantity must be positive");
+    }
+
+    const outstanding = outcome === "YES" ? state.qYes : state.qNo;
+    if (qtyD.gt(outstanding)) {
+      throw new Error(
+        "Cannot sell " + qtyD.toString() + " " + outcome +
+        " shares: only " + outstanding.toString() + " outstanding in market"
+      );
+    }
+
+    const pricesBefore = this.getPrices(state);
+    const costBefore = this._cost(state);
+
+    const qYesAfter = outcome === "YES" ? state.qYes.minus(qtyD) : state.qYes;
+    const qNoAfter = outcome === "NO" ? state.qNo.minus(qtyD) : state.qNo;
+    const stateAfter: MarketState = { ...state, qYes: qYesAfter, qNo: qNoAfter };
+
+    const costAfter = this._cost(stateAfter);
+    const receipt = costBefore.minus(costAfter);
+    const avgPrice = qtyD.gt(0) ? receipt.div(qtyD) : this.ZERO;
+
+    const pricesAfter = this.getPrices(stateAfter);
+
+    return {
+      payment: receipt,
+      avgPrice,
+      qty: qtyD,
+      outcome,
+      pricesBefore: { yes: pricesBefore.pYES, no: pricesBefore.pNO },
+      pricesAfter: { yes: pricesAfter.pYES, no: pricesAfter.pNO },
+    };
+  }
+
+  executeSell(
+    ledger: Ledger,
+    traderId: string,
+    outcome: Outcome,
+    qty: number | Decimal,
+  ): ExecutionResult {
+    if (ledger.market.settled) {
+      throw new Error("Cannot trade in settled market");
+    }
+
+    const trader = ledger.traders.get(traderId);
+    if (!trader) {
+      throw new Error("Trader " + traderId + " not found");
+    }
+
+    const qtyD = qty instanceof Decimal ? qty : new Decimal(qty);
+    if (qtyD.lte(0)) {
+      throw new Error("Quantity must be positive");
+    }
+
+    const traderShares = outcome === "YES" ? trader.yesShares : trader.noShares;
+    if (qtyD.gt(traderShares)) {
+      throw new Error(
+        "Insufficient " + outcome + " shares: need " + qtyD.toString() +
+        ", have " + traderShares.toString()
+      );
+    }
+
+    const quote = this.quoteQtySell(ledger.market, outcome, qtyD);
+    const receipt = quote.payment;
+
+    const updatedTrader: TraderAccount = {
+      ...trader,
+      cash: trader.cash.plus(receipt),
+      yesShares: outcome === "YES" ? trader.yesShares.minus(qtyD) : trader.yesShares,
+      noShares: outcome === "NO" ? trader.noShares.minus(qtyD) : trader.noShares,
+    };
+
+    if (updatedTrader.yesShares.lt(0) || updatedTrader.noShares.lt(0)) {
+      throw new Error("Accounting error: trader shares would be negative");
+    }
+
+    const qYesAfter = outcome === "YES" ? ledger.market.qYes.minus(qtyD) : ledger.market.qYes;
+    const qNoAfter = outcome === "NO" ? ledger.market.qNo.minus(qtyD) : ledger.market.qNo;
+    const newTotalCollected = ledger.market.totalCollected.minus(receipt);
+
+    if (qYesAfter.lt(0) || qNoAfter.lt(0)) {
+      throw new Error("Accounting error: market outstanding shares would be negative");
+    }
+
+    const updatedMarket: MarketState = {
+      ...ledger.market,
+      qYes: qYesAfter,
+      qNo: qNoAfter,
+      totalCollected: newTotalCollected,
+    };
+
+    this.tradeCounter++;
+    const tradeId = "TRD-" + this.tradeCounter.toString().padStart(8, "0");
+    const timestamp = new Date().toISOString();
+
+    return {
+      tradeId,
+      traderId,
+      outcome,
+      qty: qtyD,
+      spend: receipt,
+      avgPrice: quote.avgPrice,
+      pricesBefore: quote.pricesBefore,
+      pricesAfter: quote.pricesAfter,
+      timestamp,
+      newState: updatedMarket,
+      newTraderAccount: updatedTrader,
+    };
+  }
+
   executeBuy(
     ledger: Ledger,
     traderId: string,

@@ -63,12 +63,13 @@ function cloneCLOBLedger(ledger: CLOBLedger): CLOBLedger {
   // Reconstruct bids (price -> PriceLevel)
   if (serialized.market.orderBook.bids) {
     for (const [price, level] of Object.entries(serialized.market.orderBook.bids)) {
+      const typedLevel = level as any;
       // Convert Decimal strings back to Decimal objects
       const reconstructedLevel: PriceLevel = {
-        price: new Decimal(level.price),
-        side: level.side,
-        totalQty: new Decimal(level.totalQty),
-        orders: level.orders.map((o: any) => ({
+        price: new Decimal(typedLevel.price),
+        side: typedLevel.side,
+        totalQty: new Decimal(typedLevel.totalQty),
+        orders: typedLevel.orders.map((o: any) => ({
           ...o,
           price: new Decimal(o.price),
           qty: new Decimal(o.qty),
@@ -82,11 +83,12 @@ function cloneCLOBLedger(ledger: CLOBLedger): CLOBLedger {
   // Reconstruct asks
   if (serialized.market.orderBook.asks) {
     for (const [price, level] of Object.entries(serialized.market.orderBook.asks)) {
+      const typedLevel = level as any;
       const reconstructedLevel: PriceLevel = {
-        price: new Decimal(level.price),
-        side: level.side,
-        totalQty: new Decimal(level.totalQty),
-        orders: level.orders.map((o: any) => ({
+        price: new Decimal(typedLevel.price),
+        side: typedLevel.side,
+        totalQty: new Decimal(typedLevel.totalQty),
+        orders: typedLevel.orders.map((o: any) => ({
           ...o,
           price: new Decimal(o.price),
           qty: new Decimal(o.qty),
@@ -175,6 +177,8 @@ function cloneLMSRLedger(ledger: LMSRLedger): LMSRLedger {
     b: serialized.market.b,
     qYes: new Decimal(serialized.market.qYes),
     qNo: new Decimal(serialized.market.qNo),
+    totalCollected: new Decimal(serialized.market.totalCollected ?? 0),
+    settled: serialized.market.settled ?? false,
   };
 
   return { market, traders };
@@ -220,17 +224,29 @@ export class CLOBEngineAdapter implements UnifiedEngine {
     }
   }
 
+  creditShares(traderId: string, outcome: Outcome, qty: number): void {
+    const trader = this.ledger.traders.get(traderId);
+    if (trader) {
+      if (outcome === "YES") {
+        trader.yesShares = trader.yesShares.plus(qty);
+      } else {
+        trader.noShares = trader.noShares.plus(qty);
+      }
+    }
+  }
+
   processOrder(intent: OrderIntent): ExecutionResult {
     const timestamp = Date.now();
     const intentId = intent.intentId;
 
-    // Ensure trader exists
-    this.addTrader(intent.traderId, 10000);
+    // Note: Traders are initialized upfront by the simulation runner
+    // with the scenario's initialCash. Throw error if trader not found.
+    if (!this.ledger.traders.has(intent.traderId)) {
+      throw new Error(`Trader ${intent.traderId} not initialized. Simulation runner should initialize all traders.`);
+    }
 
-    // Convert side: BUY = buying YES, SELL = selling YES
-    // In prediction market, SELL is equivalent to buying NO
-    const isBuying = intent.side === "BUY";
     const outcome = intent.outcome; // "YES" or "NO"
+    const side = intent.side; // "BUY" or "SELL"
 
     let clobResult: CLOBOrderResult;
 
@@ -239,43 +255,55 @@ export class CLOBEngineAdapter implements UnifiedEngine {
 
     try {
       if (intent.orderType === "MARKET") {
+        // MARKET orders: Execute immediately at best available price
         const qty = intent.qty ?? intent.spend ?? 0;
-        clobResult = this.engine.placeMarketOrder(
-          this.ledger,
-          intent.traderId,
-          isBuying ? "BUY" : "SELL",
-          qty
-        );
+
+        if (outcome === "YES") {
+          // YES trades are straightforward
+          clobResult = this.engine.placeMarketOrder(
+            this.ledger,
+            intent.traderId,
+            side,
+            qty
+          );
+        } else {
+          // NO trades: In prediction markets, NO is the complement of YES
+          // BUY + NO = SELL + YES (selling YES short at market)
+          // SELL + NO = BUY + YES (buying YES to cover short or convert position)
+          const convertedSide = side === "BUY" ? "SELL" : "BUY";
+          clobResult = this.engine.placeMarketOrder(
+            this.ledger,
+            intent.traderId,
+            convertedSide,
+            qty
+          );
+        }
       } else {
-        // LIMIT order
+        // LIMIT orders: Place at specified price
         const price = intent.price ?? 0.5;
         const qty = intent.qty ?? intent.spend ?? 0;
 
-        if (outcome === "NO") {
-          // In CLOB, selling YES shares is equivalent to buying NO
-          // For a SELL of NO, we place a BUY of YES at (1 - price)
-          // Actually, let's simplify: treat outcome directly
-          if (isBuying) {
-            // Buying NO = selling YES shares short
-            // This requires different handling - for now, reject
-            throw new Error("Buying NO not directly supported in CLOB adapter");
-          } else {
-            // Selling NO = buying YES
-            clobResult = this.engine.placeLimitOrder(
-              this.ledger,
-              intent.traderId,
-              "BUY",
-              price,
-              qty
-            );
-          }
-        } else {
-          // Trading YES directly
+        if (outcome === "YES") {
+          // YES trades at specified price (standard)
           clobResult = this.engine.placeLimitOrder(
             this.ledger,
             intent.traderId,
-            isBuying ? "BUY" : "SELL",
+            side,
             price,
+            qty
+          );
+        } else {
+          // NO trades: Price is the complement
+          // If someone wants to BUY NO at price 0.30, they're willing to SELL YES at 0.70 (1 - 0.30)
+          // If someone wants to SELL NO at price 0.30, they're willing to BUY YES at 0.70
+          const convertedPrice = new Decimal(1).minus(price);
+          const convertedSide = side === "BUY" ? "SELL" : "BUY";
+
+          clobResult = this.engine.placeLimitOrder(
+            this.ledger,
+            intent.traderId,
+            convertedSide,
+            convertedPrice,
             qty
           );
         }
@@ -405,7 +433,7 @@ export class CLOBEngineAdapter implements UnifiedEngine {
 
   getMidPrice(): Decimal | null {
     const book = this.ledger.market.orderBook;
-    return this.engine.getMidPrice(book);
+    return this.engine.getMidPrice(book) ?? null;
   }
 
   getBestBid(): Decimal | null {
@@ -548,13 +576,12 @@ export class CLOBEngineAdapter implements UnifiedEngine {
       type: "ORDER_RECEIVED",
       timestamp: intent.timestamp,
       engineType: this.engineType,
-      data: { intentId: intent.intentId, ...intent },
+      data: intent,
     });
 
     // Order result
     logs.push({
       type: result.status === "CANCELLED" ? "ORDER_CANCELLED" :
-            result.status === "REJECTED" ? "ORDER_REJECTED" :
             result.filledQty.eq(intent.qty ?? 0) ? "ORDER_FILLED" : "ORDER_PARTIALLY_FILLED",
       timestamp: Date.now(),
       engineType: this.engineType,
@@ -567,7 +594,7 @@ export class CLOBEngineAdapter implements UnifiedEngine {
         type: "TRADE_EXECUTED",
         timestamp: Date.now(),
         engineType: this.engineType,
-        data: { tradeId: trade.tradeId, ...trade },
+        data: trade,
       });
     }
 
@@ -667,32 +694,70 @@ export class LMSREngineAdapter implements UnifiedEngine {
     this.traderStats.set(traderId, { trades: 0, volume: new Decimal(0), value: new Decimal(0) });
   }
 
+  creditShares(traderId: string, outcome: Outcome, qty: number): void {
+    // LMSR doesn't need pre-seeding - market maker always accepts orders
+    // This is a no-op for LMSR
+  }
+
   processOrder(intent: OrderIntent): ExecutionResult {
     const timestamp = Date.now();
     const intentId = intent.intentId;
 
-    this.addTrader(intent.traderId, 10000);
+    // Note: Traders are initialized upfront by the simulation runner
+    // with the scenario's initialCash. Throw error if trader not found.
+    if (!this.ledger.traders.has(intent.traderId)) {
+      throw new Error(`Trader ${intent.traderId} not initialized. Simulation runner should initialize all traders.`);
+    }
 
     const stateBefore = this.getMarketState();
 
     try {
       let lmsrResult: LMSRExecutionResult;
       const outcome = intent.outcome; // "YES" or "NO"
+      const side = intent.side; // "BUY" or "SELL"
+
       const qty = intent.qty ?? 0;
       const spend = intent.spend ?? 0;
+      const qtyNum = typeof qty === "number" ? qty : qty.toNumber();
+      const spendNum = typeof spend === "number" ? spend : spend.toNumber();
 
-      if (intent.orderType === "MARKET") {
-        // Use spend-based execution
-        const actualSpend = spend > 0 ? spend : (qty ?? 0) * 0.5;
+      if (side === "SELL") {
+        // Native LMSR sell: trader returns shares of `outcome` to the market
+        // and receives cash C(q) - C(q'). Qty-based only; MARKET and LIMIT both
+        // consume the trader's share balance up to qty.
+        const actualQty = qtyNum > 0 ? qtyNum : spendNum * 2;
+        lmsrResult = this.engine.executeSell(
+          this.ledger,
+          intent.traderId,
+          outcome,
+          actualQty
+        );
+      } else if (
+        intent.orderType === "MARKET" &&
+        spendNum > 0 &&
+        !(intent.qty && qtyNum > 0)
+      ) {
+        // BUY MARKET with an explicit spend budget (no qty): budget-capped
+        // purchase via the LMSR cost function.
+        const trader = this.ledger.traders.get(intent.traderId);
+        const availableCash = trader ? trader.cash.toNumber() : 0;
+        if (spendNum > availableCash) {
+          return this.createRejectedResult(intent, stateBefore, "Insufficient cash");
+        }
         lmsrResult = this.engine.executeBuySpend(
           this.ledger,
           intent.traderId,
           outcome,
-          actualSpend
+          spendNum
         );
       } else {
-        // Use qty-based execution
-        const actualQty = qty > 0 ? qty : (spend ?? 0) * 2;
+        // BUY (LIMIT, or MARKET with qty given): quantity-based execution.
+        // The old code approximated spend as qty*0.5 for qty-only MARKET
+        // BUYs, which under-funded the purchase whenever the mid was not 0.5
+        // (e.g. Thin scenarios with mid ~0.85). Dispatching on `executeBuy`
+        // pays whatever the LMSR cost function demands; insufficient-cash is
+        // thrown by the engine and caught below.
+        const actualQty = qtyNum > 0 ? qtyNum : spendNum * 2;
         lmsrResult = this.engine.executeBuy(
           this.ledger,
           intent.traderId,
@@ -727,6 +792,19 @@ export class LMSREngineAdapter implements UnifiedEngine {
       const priceBefore = stateBefore.priceYes ?? null;
       const priceAfter = lmsrResult.pricesAfter.yes ?? null;
 
+      // For SELL, cash change is a credit (+receipt); yesShares/noShares decrease.
+      // For BUY, cash change is a debit (-spend); shares increase.
+      const cashDelta = side === "SELL" ? lmsrResult.spend : lmsrResult.spend.neg();
+      const shareDelta = side === "SELL" ? lmsrResult.qty.neg() : lmsrResult.qty;
+
+      // Slippage / price impact now derivable because priceBefore is known.
+      const slippage = priceBefore
+        ? calcSlippage(priceBefore, lmsrResult.avgPrice, intent.side)
+        : null;
+      const priceImpact = priceBefore && priceAfter
+        ? calcPriceImpact(priceBefore, priceAfter, intent.side)
+        : null;
+
       return {
         engineType: this.engineType,
         intent,
@@ -737,12 +815,12 @@ export class LMSREngineAdapter implements UnifiedEngine {
         avgFillPrice: lmsrResult.avgPrice,
         priceBefore,
         priceAfter,
-        slippage: null, // No slippage in LMSR (you always get quoted price)
-        priceImpact: null, // Price impact already factored into LMSR
+        slippage,
+        priceImpact,
         deltas: {
-          cashChanges: new Map([[intent.traderId, lmsrResult.spend.neg()]]),
-          yesShareChanges: new Map([[intent.traderId, outcome === "YES" ? lmsrResult.qty : new Decimal(0)]]),
-          noShareChanges: new Map([[intent.traderId, outcome === "NO" ? lmsrResult.qty : new Decimal(0)]]),
+          cashChanges: new Map([[intent.traderId, cashDelta]]),
+          yesShareChanges: new Map([[intent.traderId, outcome === "YES" ? shareDelta : new Decimal(0)]]),
+          noShareChanges: new Map([[intent.traderId, outcome === "NO" ? shareDelta : new Decimal(0)]]),
           ordersAdded: [],
           ordersRemoved: [],
           ordersModified: [],
@@ -848,14 +926,14 @@ export class LMSREngineAdapter implements UnifiedEngine {
       type: "ORDER_RECEIVED",
       timestamp: intent.timestamp,
       engineType: this.engineType,
-      data: { intentId: intent.intentId, ...intent },
+      data: intent,
     });
 
     logs.push({
       type: "ORDER_FILLED",
       timestamp: Date.now(),
       engineType: this.engineType,
-      data: { intentId: intent.intentId, ...result },
+      data: result,
     });
 
     return logs;
@@ -918,7 +996,6 @@ export {
   createHybridEngineV2 as createHybridEngine,
   createHybridConfig,
   HybridRouterV2,
-  createCLOBFirstConfig,
   createSpreadBasedConfig,
 } from "./hybrid-router-v2";
 export type { HybridConfigV2 as HybridConfig } from "./hybrid-router-v2";

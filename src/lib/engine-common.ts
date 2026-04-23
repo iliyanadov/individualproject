@@ -126,7 +126,7 @@ export interface ExecutionResult {
   /** Order intent that was processed */
   intent: OrderIntent;
   /** Status of the order */
-  status: "FILLED" | "PARTIALLY_FILLED" | "REJECTED" | "CANCELLED";
+  status: "FILLED" | "PARTIALLY_FILLED" | "REJECTED" | "CANCELLED" | "OPEN";
   /** Individual fills/trades */
   fills: FillInfo[];
   /** Total quantity filled */
@@ -159,6 +159,7 @@ export interface ExecutionResult {
 export type LogEntryType =
   | "ORDER_RECEIVED"
   | "ORDER_ACCEPTED"
+  | "ORDER_PLACED"
   | "ORDER_REJECTED"
   | "ORDER_FILLED"
   | "ORDER_PARTIALLY_FILLED"
@@ -232,6 +233,17 @@ export interface UnifiedEngine {
    * @returns Execution result with fills, state changes, etc.
    */
   processOrder(intent: OrderIntent): ExecutionResult;
+
+  /**
+   * Add a trader with initial cash
+   */
+  addTrader(traderId: string, cash: number): void;
+
+  /**
+   * Credit shares to a trader (for seeding initial positions)
+   * Only used for CLOB to allow early sell orders
+   */
+  creditShares(traderId: string, outcome: Outcome, qty: number): void;
 
   /**
    * Get current market state snapshot
